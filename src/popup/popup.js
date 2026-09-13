@@ -94,9 +94,9 @@ function renderReview(run) {
       run.parseConfidence === 'labeled'
         ? 'ตรวจสอบผลที่แยกได้ก่อนไปต่อ (แก้ไขได้ถ้าไม่ตรง):'
         : '⚠️ แยกหัวข้ออัตโนมัติไม่มั่นใจ — กรุณาตรวจ/แก้ไขให้ถูกต้องก่อนไปต่อ:';
-    addTextarea(container, 'productDetails', 'รายละเอียดสินค้า', run.productDetails);
-    addTextarea(container, 'storyboardPrompt', 'Prompt สำหรับสร้างภาพ storyboard', run.storyboardPrompt);
-    addTextarea(container, 'videoPrompt', 'Prompt สำหรับสร้างวิดีโอ', run.videoPrompt);
+    addTextarea(container, 'storyboardPlan', 'Storyboard Plan (5 shots)', run.storyboardPlan);
+    addTextarea(container, 'storyboardPrompt', 'Prompt สำหรับสร้างภาพ storyboard (5-panel)', run.storyboardPrompt);
+    addTextarea(container, 'videoPrompt', 'Prompt สำหรับสร้างวิดีโอ (10 วิ, 5 ซีน)', run.videoPrompt);
   } else if (run.currentStep === 'imagegen') {
     hint.textContent = 'ตรวจสอบภาพ storyboard และ prompt วิดีโอก่อนส่งเข้า Google Flow:';
     const img = document.createElement('img');

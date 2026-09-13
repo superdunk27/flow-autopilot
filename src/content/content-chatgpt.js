@@ -56,24 +56,40 @@
   }
 
   /**
-   * Splits the analysis reply into the 3 sections FA_ANALYZE_TEMPLATE asks
-   * for: product description / storyboard image prompt / video animation
-   * prompt. Since v2 sends that exact template as a plain message (no
-   * custom GPT), we know the model is asked for literal "1. Product
-   * Description" / "2. Storyboard Image Prompt" / "3. Video Animation
-   * Prompt" headings — matched first, with the older looser Thai/English
-   * heuristics kept as secondary alternatives in case the model doesn't
-   * echo the heading text exactly. Falls back to splitting the text into
-   * 3 roughly-equal paragraph groups so the pipeline still has
-   * *something* to show in the review step rather than crashing outright
-   * — the review step (see popup) always lets the user fix a bad split by
-   * hand, so this fallback is safe, never silently wrong.
+   * Splits the analysis reply into the 3 sections FA_ANALYZE_TEMPLATE (v3)
+   * asks for: storyboard plan (5 shots) / storyboard image prompt / video
+   * prompt. Since the template is sent verbatim as a plain message (no
+   * custom GPT), we know the model is asked for literal "1. Storyboard
+   * Plan (5 Shots)" / "2. Storyboard Image Prompt" / "3. Video Prompt (10
+   * seconds, 5 scenes)" headings — matched first, with looser fallback
+   * alternatives (heading text without the leading number, in case
+   * numbering/formatting drifts) as secondary. Falls back to splitting
+   * the text into 3 roughly-equal paragraph groups so the pipeline still
+   * has *something* to show in the review step rather than crashing
+   * outright — the review step (see popup) always lets the user fix a
+   * bad split by hand, so this fallback is safe, never silently wrong.
+   *
+   * Guard against a real bug QA found in PR #2's version of this
+   * function: a heading pattern can technically "match" while capturing
+   * an empty or near-empty section (e.g. two headings landing back to
+   * back with nothing meaningful between them) — that's a labeled match
+   * that isn't actually usable. If autoReview happened to be off, an
+   * empty videoPrompt would go straight into Google Flow's prompt field
+   * unnoticed. So a labeled match with any section under MIN_SECTION_LEN
+   * characters is treated as not good enough and falls through to the
+   * paragraph fallback instead of being returned as-is.
    */
+  const MIN_SECTION_LEN = 10;
+
   function parseAnalysisResponse(text) {
+    // Each alternative consumes the rest of its heading line ([^\n]*) so
+    // a trailing parenthetical like "(5 Shots)" or "(10 seconds, 5
+    // scenes)" is swallowed by the label match instead of leaking into
+    // the start of the captured section body.
     const labelPatterns = [
-      { key: 'productDetails', re: /(1\.\s*product description|รายละเอียดสินค้า|product details?)[:：]?/i },
-      { key: 'storyboardPrompt', re: /(2\.\s*storyboard image prompt|storyboard[^:：]*prompt|prompt.*storyboard|prompt สำหรับ.*storyboard)[:：]?/i },
-      { key: 'videoPrompt', re: /(3\.\s*video animation prompt|prompt.*วิดีโอ|video prompt|prompt สำหรับ.*วิดีโอ)[:：]?/i },
+      { key: 'storyboardPlan', re: /(1\.\s*storyboard plan[^\n]*|storyboard plan[^\n]*)/i },
+      { key: 'storyboardPrompt', re: /(2\.\s*storyboard image prompt[^\n]*|storyboard image prompt[^\n]*|storyboard[^\n：]*prompt[^\n]*|prompt.*storyboard[^\n]*)/i },
+      { key: 'videoPrompt', re: /(3\.\s*video prompt[^\n]*|video prompt[^\n]*)/i },
     ];
 
     const matches = labelPatterns
@@ -90,7 +106,13 @@
         const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
         result[m.key] = text.slice(m.matchEnd, end).trim();
       });
-      return { ...result, parseConfidence: 'labeled' };
+      const allSectionsUsable = Object.values(result).every((v) => v.length >= MIN_SECTION_LEN);
+      if (allSectionsUsable) {
+        return { ...result, parseConfidence: 'labeled' };
+      }
+      // Headings matched but at least one section came out empty/near-
+      // empty — don't ship that silently, fall through to the paragraph
+      // fallback below instead.
     }
 
     // Fallback: split into paragraph blocks, group into 3.
@@ -98,7 +120,7 @@
     if (paragraphs.length >= 3) {
       const third = Math.ceil(paragraphs.length / 3);
       return {
-        productDetails: paragraphs.slice(0, third).join('\n\n'),
+        storyboardPlan: paragraphs.slice(0, third).join('\n\n'),
         storyboardPrompt: paragraphs.slice(third, third * 2).join('\n\n'),
         videoPrompt: paragraphs.slice(third * 2).join('\n\n'),
         parseConfidence: 'fallback',
@@ -106,7 +128,7 @@
     }
 
     return {
-      productDetails: text,
+      storyboardPlan: text,
       storyboardPrompt: text,
       videoPrompt: text,
       parseConfidence: 'failed',

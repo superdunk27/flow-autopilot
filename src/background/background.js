@@ -166,7 +166,7 @@ async function handleMessage(message, sender) {
       const { step, fields } = message.payload;
       if (step === FA_STEPS.ANALYZE) {
         await setRun({
-          productDetails: fields.productDetails,
+          storyboardPlan: fields.storyboardPlan,
           storyboardPrompt: fields.storyboardPrompt,
           videoPrompt: fields.videoPrompt,
         });
@@ -222,7 +222,7 @@ async function handleStepDone(message) {
 
   if (step === FA_STEPS.ANALYZE) {
     const patch = {
-      productDetails: payload.productDetails,
+      storyboardPlan: payload.storyboardPlan,
       storyboardPrompt: payload.storyboardPrompt,
       videoPrompt: payload.videoPrompt,
       rawAnalyzeResponse: payload.raw,

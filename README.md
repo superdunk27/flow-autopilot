@@ -3,12 +3,13 @@
 Chrome extension (Manifest V3) that chains 3 manual copy-paste steps into
 one click:
 
-1. **ChatGPT (plain chat)** — analyzes a product photo, returns product
-   details + a storyboard-image prompt + a video prompt.
-2. **ChatGPT image generation** — turns the storyboard prompt (+ the same
-   product photo) into a storyboard image.
-3. **Google Flow (Veo)** — turns the storyboard image + video prompt into
-   an AI video clip.
+1. **ChatGPT (plain chat)** — analyzes a product photo, returns a 5-shot
+   storyboard plan + a 5-panel storyboard-image prompt + a 10-second
+   video prompt.
+2. **ChatGPT image generation** — turns the storyboard-image prompt (+
+   the same product photo) into a single 5-panel contact-sheet image.
+3. **Google Flow (Veo)** — turns that 5-panel image + video prompt into a
+   10-second, 5-scene AI video clip.
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
@@ -31,6 +32,27 @@ Inspired by the manual workflow shown in [this YouTube Short](https://www.youtub
    `manifest.json`).
 3. Open the popup, choose a product photo, click **Run**. That's it — no
    configuration needed before first use.
+
+## v3: 5-shot UGC Minimal storyboard
+
+The analyze template (`FA_ANALYZE_TEMPLATE`) was replaced again after
+Toey reviewed a real reference example: the locked element across shots
+turned out to be *style* (camera angle, lighting, on-screen text look),
+not a fixed background — each shot uses a different natural-material
+pedestal (wood, linen, stone, ceramic, basket) while camera height and
+light stay identical, giving a "UGC Minimal, Muji/Pinterest mood" feel.
+The output is now a 3-part template producing a **5-shot plan**, a
+**single 5-panel contact-sheet image prompt** (not one plain product
+shot), and a **10-second, 5-scene video prompt** (2s/scene, static
+camera + ambient motion only) instead of v2's single-shot 5-second clip.
+Headings changed to `1. Storyboard Plan (5 Shots)` / `2. Storyboard Image
+Prompt` / `3. Video Prompt (10 seconds, 5 scenes)` — `parseAnalysisResponse`
+in `content-chatgpt.js` was updated to match these exact headings (see
+"Review checkpoints" below for how a parse failure is handled). The
+internal field that used to hold a short product-description sentence is
+now `storyboardPlan` (was `productDetails`) since its content is a
+different shape entirely now — renamed throughout (`background.js`,
+`popup.js`) rather than left stale.
 
 ## v2: no custom GPT
 
@@ -133,13 +155,19 @@ Between step 1→2 and 2→3, the popup pauses and shows the extracted
 prompts (and the generated storyboard image) for the user to confirm or
 edit before continuing. This is a deliberate choice, not just a spec
 requirement: the analyze step's 3-way text split
-(`parseAnalysisResponse` in `content-chatgpt.js`) is now higher-confidence
+(`parseAnalysisResponse` in `content-chatgpt.js`) is higher-confidence
 than v1 — it matches the exact headings `FA_ANALYZE_TEMPLATE` asks for
-("1. Product Description" etc.) first, with the older looser heuristics
-kept as a fallback — but it's still parsing a model's free-text reply,
-not a guaranteed structured output. Turn review off in
-**Options → "หยุดให้ตรวจสอบผลลัพธ์ระหว่างแต่ละขั้น"** for a fully unattended
-run once you trust the split.
+("1. Storyboard Plan (5 Shots)" etc.) first, with looser fallback
+alternatives as secondary — but it's still parsing a model's free-text
+reply, not a guaranteed structured output. A labeled match is only
+trusted if **every** section came out at least 10 characters long; if a
+heading matched but its section is empty or near-empty (two headings
+landing back-to-back with nothing meaningful between them — a real
+failure mode QA caught in PR #2's version of this function, where
+`videoPrompt` could end up empty), the parser falls through to the
+paragraph-split fallback instead of silently shipping a blank prompt.
+Turn review off in **Options → "หยุดให้ตรวจสอบผลลัพธ์ระหว่างแต่ละขั้น"** for a
+fully unattended run once you trust the split.
 
 ## Known limitations / what has NOT been verified
 
@@ -207,7 +235,17 @@ element in question, and update the matching entry in
   re-trusting the earlier web-search result that had gone stale.
 - `FA_ANALYZE_TEMPLATE` diffed programmatically (Python) against the
   spec's fenced code block — confirmed byte-for-byte identical, not just
-  visually similar.
+  visually similar. Re-run for each template revision (v2, then v3) as
+  the spec changed.
+- `parseAnalysisResponse` unit-tested against two simulated model replies
+  (Node, not just read for plausibility): a realistic well-formed v3
+  reply — confirmed a clean 3-way split with no leftover heading
+  fragments (e.g. a stray `"(5 Shots)"` bleeding into the captured
+  section, an actual bug this testing caught and fixed before commit);
+  and a pathological reply with two headings landing back-to-back and
+  nothing meaningful between them — confirmed the parser does NOT return
+  a `'labeled'` result with an empty field in that case, it falls through
+  to the paragraph fallback instead.
 - **Not yet tested**: an actual end-to-end run against logged-in
   ChatGPT + Google Flow accounts (no such session is available in this
   environment — Flow's editor UI is behind a Google login wall). Please

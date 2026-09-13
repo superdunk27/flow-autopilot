@@ -39,25 +39,33 @@
   };
 
   // Verbatim from ψ/active/flow-autopilot-extension.md "Update 2026-09-13
-  // v2 — ตัด custom GPT dependency ออก". Do not paraphrase — the spec
-  // explicitly requires this exact wording for consistent output across
-  // products. This replaces the v1 custom-GPT system prompt: since free
-  // ChatGPT accounts can't create custom GPTs (verified via OpenAI help
-  // docs — GPT Builder needs Plus/Pro/Team/Enterprise), the same
-  // instructions now ride along as a plain user message on ordinary
-  // chatgpt.com instead of living in a custom GPT's system prompt.
-  root.FA_ANALYZE_TEMPLATE = `You are a product video storyboard assistant. When the user uploads a product photo, output exactly 3 sections in this order, plain text, no extra commentary:
+  // v3 — เปลี่ยน template เป็น 5-shot storyboard, UGC Minimal/Muji-Pinterest
+  // style". Do not paraphrase — the spec explicitly requires this exact
+  // wording. Supersedes the v2 template (single product-description +
+  // single-image storyboard): the real-world reference example locks the
+  // camera angle/lighting/text *style* across shots, not the pedestal/
+  // background, and the video is 5 scenes x 2s = 10s instead of one
+  // static 5s clip. Heading text changed accordingly — see
+  // parseAnalysisResponse in content-chatgpt.js, which must match these
+  // exact headings instead of the v2 ones.
+  root.FA_ANALYZE_TEMPLATE = `You are a UGC-style product video storyboard assistant. When the user uploads a product photo, output exactly 3 sections in this order, plain text, no extra commentary:
 
-## 1. Product Description
-[Look at the image, write 1-2 concise sentences identifying the product name/type and 1-2 key visual selling points]
+## 1. Storyboard Plan (5 Shots)
+Look at the image and identify the product. Write a 5-shot plan, one line per shot, in this format:
+Shot 1: [pedestal/base material and look] — [camera angle] — [on-screen text for this shot]
+Shot 2: ...
+Shot 3: ...
+Shot 4: ...
+Shot 5: ...
+Each shot places the product on a DIFFERENT base/pedestal (e.g. natural wood block, linen fabric, raw stone, ceramic dish, woven basket) but keeps the SAME camera angle/height and SAME soft natural lighting across all 5 shots, so the sequence feels like one continuous style — UGC Minimal aesthetic, Muji/Pinterest mood (neutral tones, natural materials, soft daylight, uncluttered).
 
 ## 2. Storyboard Image Prompt
-Minimalist product photography of [product name and key feature from step 1], centered on a clean pastel background (choose a color that complements the product), soft diffused studio lighting, subtle soft shadow beneath product, 3/4 angle top-down view, negative space on the right third of the frame reserved for text, add a clean minimal sans-serif text overlay in a color that contrasts with the background reading "[write a short 2-4 word Thai headline fitting the product]" positioned in that negative space, consistent minimal beauty-product aesthetic, 9:16 vertical composition, high-key soft lighting, no clutter, no extra objects
+A single image generation prompt (for Nano Banana / GPT Image) that produces ONE image containing all 5 shots as a horizontal 5-panel contact sheet, in this exact style: UGC Minimal aesthetic, Muji/Pinterest mood — neutral beige/white/wood tones, soft natural window light, no harsh shadows, each panel shows the product on a different natural-material pedestal per the plan above, same camera height and framing across all panels, clean minimal sans-serif text overlay in each panel matching the on-screen text from the plan, 9:16 vertical, consistent color grade across all 5 panels, no clutter, no extra props.
 
-## 3. Video Animation Prompt
-Animate this exact image with a slow gentle push-in camera movement, subtle soft light shimmer on the product surface, keep the product, background, composition, and all text overlays completely static and unchanged — do not redraw or regenerate the text, only add motion to lighting and very subtle product highlight, cinematic minimal aesthetic, smooth 5 second clip, no camera shake, preserve exact color palette from the source image
+## 3. Video Prompt (10 seconds, 5 scenes)
+A single video generation prompt (compatible with Flow/Veo, Sora, or Kling) describing: animate the 5-panel storyboard image above into a 10-second video, cutting to a new scene every 2 seconds in the same order as the panels, each scene is a static-camera shot with only gentle ambient motion (soft light shimmer, subtle depth breathing) — do not move the camera, do not redraw or regenerate any text overlay, keep all on-screen text completely static per scene, simple clean cuts between scenes (no fancy wipes/transitions), consistent color grade throughout, UGC minimal aesthetic maintained across all 5 scenes.
 
-Always fill in the bracketed placeholders based on the uploaded image. Never change the fixed wording outside the placeholders — consistency across all products is critical.`;
+Always base shot details on the uploaded product image. Keep the house style (UGC Minimal, Muji/Pinterest mood, soft natural light, natural-material pedestals, consistent camera height, static-camera-with-ambient-motion video style) IDENTICAL across every product — only the pedestal choices, on-screen text, and product itself vary per shot.`;
 
   // Short trailing line appended after the template, sent together with
   // the attached image in one message. Per spec this is given as an
