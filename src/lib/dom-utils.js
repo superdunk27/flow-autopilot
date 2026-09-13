@@ -29,6 +29,46 @@
     }
   }
 
+  /**
+   * ChatGPT's real, confirmed rate-limit notice for chats containing
+   * files/images (hit live 2026-09-14 while testing the analyze step —
+   * see README "v5"): "Chat paused until usage resets at <time> — You've
+   * reached the limit for chats that include files or images. Start a
+   * new text-only chat or upgrade to continue now." Thrown instead of
+   * trusting whatever content did or didn't get generated — a rate-limit
+   * hit is treated as an error unconditionally (never silently used, even
+   * if a response happens to look complete), since there's no reliable
+   * way to tell whether the banner appearing mid-generation means the
+   * response is trustworthy or truncated.
+   */
+  class FARateLimitError extends Error {
+    constructor({ step, resetsAt }) {
+      super(
+        `[Flow Autopilot] ChatGPT free tier มี rate limit สำหรับแชทที่มีไฟล์/รูปแนบ ในขั้น "${step}" — ` +
+          `เจอข้อความ "You've reached the limit for chats that include files or images"` +
+          `${resetsAt ? ` (จะใช้ได้อีกครั้งตอน ${resetsAt})` : ''}. ` +
+          `${resetsAt ? 'รอจนถึงเวลาที่ระบุ' : 'รอสักครู่'} หรือ upgrade บัญชี แล้วลองใหม่ — ไม่เชื่อถือ response ที่ได้ตอนนี้ เผื่อไว้ก่อนว่าอาจไม่ครบ`
+      );
+      this.name = 'FARateLimitError';
+      this.step = step;
+      this.resetsAt = resetsAt || null;
+    }
+  }
+
+  /**
+   * Scans the page's visible text for ChatGPT's rate-limit banner (see
+   * FARateLimitError above). Returns the extracted "resets at ..." time
+   * string if found (or `true` if the phrase matched but the time
+   * couldn't be parsed out), otherwise `false`. Does not throw — callers
+   * decide what to do with a positive match.
+   */
+  function detectChatGptRateLimit() {
+    const text = document.body ? document.body.innerText : '';
+    if (!/reached the limit for chats that include files or images/i.test(text)) return false;
+    const m = /resets at\s*([\d:]+\s*[AaPp]\.?[Mm]\.?)/.exec(text);
+    return m ? m[1] : true;
+  }
+
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const randomDelay = (minMs, maxMs) =>
@@ -302,7 +342,9 @@
     setNativeValue,
     typeIntoComposer,
     serializeError,
+    detectChatGptRateLimit,
   };
   root.FASelectorError = FASelectorError;
   root.FATimeoutError = FATimeoutError;
+  root.FARateLimitError = FARateLimitError;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -106,6 +106,26 @@
       description: 'ChatGPT กำลังตอบ',
       timeoutMs: 5 * 60 * 1000,
     });
+
+    // ChatGPT free tier rate-limits chats with files/images attached —
+    // confirmed real live 2026-09-14 (see README "v5"). Checked here,
+    // right after generation "completes", because this is also the one
+    // place that catches the worst case: if the limit blocks generation
+    // from ever starting, the "stop generating" button never appears at
+    // all, so waitForGenerationComplete's grace-window logic would
+    // otherwise resolve as if generation finished normally — a real
+    // silent-wrong-success risk, not just a cosmetic one. Any positive
+    // match is treated as a hard error unconditionally, even if the
+    // response looks complete, since there's no reliable way to tell
+    // whether a banner appearing mid-generation means the response is
+    // trustworthy or truncated.
+    const rateLimitHit = FA_UTILS.detectChatGptRateLimit();
+    if (rateLimitHit) {
+      throw new FARateLimitError({
+        step,
+        resetsAt: typeof rateLimitHit === 'string' ? rateLimitHit : null,
+      });
+    }
   }
 
   /**

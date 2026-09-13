@@ -40,11 +40,25 @@ function against that real text — clean split, `parseConfidence:
   (`button[data-testid="composer-plus-btn"]`), and `assistantMessages`
   (`[data-message-author-role="assistant"]`) — all confirmed exactly
   right, no changes needed.
-- **New constraint discovered**: ChatGPT's free tier rate-limits chats
-  that include files/images (hit this mid-session: "Chat paused until
-  usage resets"). This is a real operational limit the extension doesn't
-  currently detect or explain — worth handling explicitly in a future
-  round (see "Known limitations").
+- **New constraint discovered, now handled**: ChatGPT's free tier rate-
+  limits chats that include files/images (hit this mid-session: "Chat
+  paused until usage resets at 12:28 AM — You've reached the limit for
+  chats that include files or images..."). `FA_UTILS.detectChatGptRateLimit()`
+  scans the page for that exact confirmed phrase (ignoring the dynamic
+  time) right after generation "completes" — the one place that also
+  catches the worst case, where the limit blocks generation from ever
+  starting and the "stop generating" button never appears at all, which
+  would otherwise make `waitForGenerationComplete`'s grace-window logic
+  resolve as if generation finished normally (a real silent-wrong-
+  success risk, not a cosmetic one). Any match throws `FARateLimitError`
+  unconditionally — even if the response looks complete, since there's
+  no reliable way to tell whether a banner appearing mid-generation means
+  the response is trustworthy or truncated — surfaced through the
+  existing error-view pipeline in the popup, extracting the "resets at
+  ..." time into the message when present. Unit-tested against the exact
+  real banner text captured this round, plus a normal-page case
+  (correctly returns `false`), and confirmed loaded and callable inside
+  the real content-script isolated world via CDP.
 
 **Google Flow — partially confirmed, investigation cut short.**
 Confirmed: `flow.google.com` is genuinely logged in; clicking "New
