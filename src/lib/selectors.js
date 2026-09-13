@@ -142,37 +142,42 @@
         'button[aria-label*="New project" i]',
         'a[href*="/project/"]',
       ],
-      // Image-upload input. NOT yet confirmed — live DOM query inside a
-      // real project found ZERO <input type="file"> elements present by
-      // default (unlike ChatGPT, which has several hidden ones already
-      // in the DOM). Flow instead exposes two real, confirmed entry
-      // points that presumably create a file input dynamically once
-      // engaged: a top-nav "Add media menu" button (opens Upload/New
-      // collection/Create character/New scene) and a composer-adjacent
-      // "Add ingredients to the prompt box" button — the latter is more
-      // likely correct for our use case (attaching the storyboard image
-      // directly to a generation prompt) but neither was click-tested
-      // through to a real file input this round (see README "Known
-      // limitations" — live interaction became unreliable partway
-      // through this investigation). `accept*="image"` narrows to actual
-      // image inputs once one does appear, since Flow's editor plausibly
-      // has more than one file input for different purposes — the bare
-      // `input[type="file"]` alone is too easy to match the wrong one
-      // silently, kept as the last-resort candidate, not the first.
+      // Image-upload input. CONFIRMED live 2026-09-14 (2nd round): no
+      // <input type="file"> exists by default, but clicking
+      // uploadDropzone[0] then uploadButton (below) makes one appear with
+      // a real, highly distinctive accept list:
+      // ".png,.jpg,.jpeg,.webp,.gif,.heif,.heic,.mp4,.m4v,.mov,.3gp,.avi"
+      // — matched on `.heic` since that extension is unlikely to appear
+      // in any other file input's accept list on this page, avoiding the
+      // silent-wrong-match risk a bare `input[type="file"]` would carry.
+      // NOT yet confirmed: whether actually feeding a file through this
+      // input via DataTransfer completes an upload (live interaction
+      // became unreliable again right as this was being tested — see
+      // README "v6").
       fileInput: [
+        'input[type="file"][accept*="heic" i]',
         'input[type="file"][accept*="image" i]',
         'input[data-testid*="upload" i][type="file"]',
         'input[type="file"]',
       ],
-      // CONFIRMED to exist live 2026-09-14 (real aria-label queried from
-      // real DOM), NOT confirmed to actually reveal the right file input
-      // when clicked (see fileInput comment above).
+      // 2-step flow, both CONFIRMED live 2026-09-14: click
+      // uploadDropzone[0] ("Add ingredients to the prompt box") to open a
+      // media panel, then click uploadButton ("Upload media" — a real
+      // `.sidebar-upload-btn` class, found by tracing up from a
+      // `<span class="upload-text">Upload media</span>` since the button
+      // itself has no aria-label/testid) to make the real fileInput
+      // above appear. content-flow.js does both clicks in sequence, with
+      // findByVisibleText("Upload media") as a fallback for uploadButton
+      // in case the class name changes.
       uploadDropzone: [
         'button[aria-label="Add ingredients to the prompt box" i]',
         'button[aria-label="Add media menu" i]',
         '[data-testid*="upload" i]',
         'button[aria-label*="upload" i]',
         'button[aria-label*="add image" i]',
+      ],
+      uploadButton: [
+        '.sidebar-upload-btn',
       ],
       // NOT yet confirmed against live DOM — the real prompt box found
       // this round (`document.querySelectorAll('textarea,

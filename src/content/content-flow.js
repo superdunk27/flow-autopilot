@@ -50,7 +50,46 @@
     }
   }
 
+  // CONFIRMED live 2026-09-14 (2nd round): no <input type="file"> exists
+  // on the page until this exact 2-click sequence happens — click "Add
+  // ingredients to the prompt box" to open a media panel, then click
+  // "Upload media" (a real `.sidebar-upload-btn`) inside it, which makes
+  // a real file input appear (accept list confirmed distinctive — see
+  // selectors.js). Feeding a file through that input via DataTransfer
+  // was NOT confirmed to complete an upload this round (live interaction
+  // became unreliable right as this was being tested) — see README "v6".
   async function uploadStoryboardImage(storyboardImageDataUrl, warnings) {
+    const dropzoneBtn = await FA_UTILS.waitFor(SEL.uploadDropzone, {
+      step: STEP,
+      description: 'ปุ่มเปิดแผงแนบไฟล์ ("Add ingredients to the prompt box")',
+    });
+    collectWarning(warnings, dropzoneBtn, SEL.uploadDropzone, 'ปุ่มเปิดแผงแนบไฟล์');
+    dropzoneBtn.click();
+    await FA_UTILS.randomDelay(500, 1000);
+
+    let uploadBtn;
+    try {
+      uploadBtn = await FA_UTILS.waitFor(SEL.uploadButton, {
+        step: STEP,
+        description: 'ปุ่ม "Upload media"',
+        timeoutMs: 8000,
+      });
+    } catch (_) {
+      uploadBtn = FA_UTILS.findByVisibleText('button, span', [/^upload media$/i, /^upload$/i]);
+      if (uploadBtn && uploadBtn.tagName !== 'BUTTON') uploadBtn = uploadBtn.closest('button') || uploadBtn;
+      if (uploadBtn) {
+        warnings.push('⚠️ ปุ่ม "Upload media": หาไม่เจอด้วย selector ที่กำหนด ใช้การจับคู่จากข้อความปุ่มแทน โปรดตรวจผลลัพธ์');
+      } else {
+        throw new FASelectorError({
+          step: STEP,
+          description: 'ปุ่ม "Upload media"',
+          selectorsTried: [...SEL.uploadButton, '<text match: upload media / upload>'],
+        });
+      }
+    }
+    uploadBtn.click();
+    await FA_UTILS.randomDelay(500, 1000);
+
     const fileInput = await FA_UTILS.waitFor(SEL.fileInput, {
       step: STEP,
       description: 'ช่องแนบไฟล์ (file input) ของ Google Flow',

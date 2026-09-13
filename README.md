@@ -13,6 +13,41 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v6: Flow upload flow — real 2-click path found
+
+A follow-up round after Toey reloaded the Flow tab (clearing a stuck
+dropdown menu from v5) plus a rate-limit-detection feature (see below).
+Real findings this round:
+
+- **Confirmed real 2-step upload flow**: no `<input type="file">` exists
+  anywhere on the page by default. Clicking "Add ingredients to the
+  prompt box" opens a media panel (tabs: All/Images/Videos/Voices/
+  Characters/Avatars, a "No assets found" empty state, and an "Upload
+  media" option). Clicking that "Upload media" button — traced up from a
+  real `<span class="upload-text">Upload media</span>` to its actual
+  clickable ancestor, since the button itself has no aria-label/testid —
+  makes a real file input appear with a highly distinctive `accept` list:
+  `.png,.jpg,.jpeg,.webp,.gif,.heif,.heic,.mp4,.m4v,.mov,.3gp,.avi`. The
+  button's real class is `.sidebar-upload-btn` (Angular Material,
+  `mdc-button` family) — now the primary `uploadButton` selector, with
+  `findByVisibleText` as a fallback. `content-flow.js`'s
+  `uploadStoryboardImage()` now does both clicks in sequence before
+  looking for the file input, matching this confirmed real flow instead
+  of assuming one click was enough.
+- **Not confirmed**: whether actually feeding a file through that input
+  via `DataTransfer` completes a real upload. Live interaction became
+  unreliable again right as this was being tested (same pattern as v5 —
+  the VNC session's input channel stopped registering keystrokes/pastes
+  after a similar number of consecutive interactions, despite a fresh
+  page reload having cleared the *previous* round's stuck state; a
+  ~75s pause and retry didn't help this time either). Stopped rather than
+  force it, per explicit instruction. `promptField`, `generateButton`,
+  `generatingIndicator`, and `resultVideo` remain entirely unverified —
+  never reached this round.
+- No destructive or unintended state left behind — clicking through the
+  upload panel didn't create any asset, project change, or generation;
+  nothing was submitted.
+
 ## v5: first live-DOM verification round
 
 With Toey's explicit permission this round, the dev environment drove the
@@ -344,14 +379,17 @@ selectors are now genuinely confirmed, not guessed. What's still open:
   this round (rate-limited before reaching that step). If it's wrong,
   it'll surface as a clear, specific "selector not found" error — never
   a silent skip of Create Image mode.
-- **Google Flow — only partially confirmed.** `newProjectButton` (real
-  finding: no aria-label at all, text-match only),
-  the two upload-entry-point buttons, and the domain itself are
-  confirmed real. `fileInput`, `promptField`, `generateButton`,
-  `generatingIndicator`, and `resultVideo` remain unverified guesses —
-  live interaction became unreliable partway through this round's Flow
-  investigation (see "v5"). Any of these being wrong will surface as a
-  specific "selector not found" error, not a silent hang or wrong
+- **Google Flow — still only partially confirmed.** `newProjectButton`
+  (real finding: no aria-label at all, text-match only), the domain
+  itself, and — as of v6 — the full 2-click upload path
+  (`uploadDropzone` → `uploadButton` → `fileInput`, with `fileInput`'s
+  distinctive `accept*="heic"` attribute confirmed real) are confirmed.
+  NOT confirmed: whether feeding a file through that confirmed input via
+  `DataTransfer` actually completes an upload (v6's live test was
+  interrupted before checking), and `promptField`, `generateButton`,
+  `generatingIndicator`, `resultVideo` remain entirely unverified guesses
+  — never reached in either round. Any of these being wrong will surface
+  as a specific "selector not found" error, not a silent hang or wrong
   action.
 - **The Google Flow domain** (`flow.google.com`) was confirmed directly
   via `curl -I`, not by trusting a web search result — see "Domain
