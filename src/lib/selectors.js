@@ -28,37 +28,52 @@
   root.FA_SELECTORS = {
     chatgpt: {
       // The hidden <input type="file"> ChatGPT's composer uses for
-      // attachments. data-testid first (specific); bare type="file" is the
-      // last-resort catch-all in case the testid changes.
+      // attachments. CONFIRMED live 2026-09-14 (real logged-in session,
+      // real product-photo upload + real send + real 3-section response
+      // received and parsed correctly end-to-end): the page actually has
+      // 5 separate hidden file inputs (#upload-files, #upload-photos
+      // [data-testid="upload-photos-input"], #upload-media, #upload-camera,
+      // #upload-media-files), each with a different `accept` value.
+      // `#upload-photos` (accept="image/*") is the one verified to
+      // actually trigger a real upload — kept first. The old
+      // `file-upload-input` testid guess never existed on real DOM;
+      // removed.
       fileInput: [
-        'input[data-testid="file-upload-input"]',
+        'input[data-testid="upload-photos-input"]',
+        '#upload-photos',
+        '#upload-files',
         'input[type="file"]',
       ],
-      // Thumbnail/chip that appears once an attachment finishes uploading.
-      // NOT a hard gate as of the real-account test round (2026-09-13):
-      // none of these 3 candidates matched real chatgpt.com DOM even
-      // though the upload genuinely succeeded (visible in the live chat)
-      // — confirmed by the exact "selector not found" error a real user
-      // hit. Rather than keep guessing at decorative markup with no live
-      // DOM access to verify against, content-chatgpt.js now uses this
-      // only as an optional/soft confidence signal (FA_UTILS.softWaitFor,
-      // never throws) and gates on sendButton becoming enabled instead —
-      // a functional signal the site has to get right for its own UI to
-      // work, not a guess at its internal markup. Still worth fixing
-      // properly with real inspect-element data when available; until
-      // then it's not load-bearing.
+      // Chip that appears once an attachment finishes uploading.
+      // CONFIRMED live 2026-09-14: the earlier 3 candidates all missed —
+      // real markup instead exposes a "Remove file" button whose
+      // aria-label includes the filename/index (e.g. "Remove file 1:
+      // product.png"), inside a container classed `...group/file-tile...`.
+      // Matched by aria-label PREFIX since the full label is dynamic.
+      // Still an optional soft signal, not a hard gate (see
+      // FA_UTILS.softWaitFor in content-chatgpt.js) — the send-button-
+      // enabled check remains the required functional gate, since a
+      // second real DOM change could just as easily invalidate this one
+      // too.
       attachmentPreview: [
+        'button[aria-label^="Remove file" i]',
+        '[class*="file-tile" i]',
         '[data-testid="attachment-thumbnail"]',
         '[class*="attachment"] img',
         'button[aria-label*="attach" i]',
       ],
       // The prompt composer (ChatGPT uses a contenteditable ProseMirror div).
+      // CONFIRMED live 2026-09-14 — `#prompt-textarea` is exactly right
+      // (a real message was typed in and sent through it end-to-end).
       composer: [
         '#prompt-textarea',
         'div[contenteditable="true"][data-id]',
         'textarea[data-testid="prompt-textarea"]',
         'div[contenteditable="true"]',
       ],
+      // CONFIRMED live 2026-09-14 — `button[data-testid="send-button"]`
+      // is exactly right (aria-label "Send prompt", `.disabled` correctly
+      // reflects composer readiness — used to send a real message).
       sendButton: [
         'button[data-testid="send-button"]',
         'button[aria-label="Send prompt"]',
@@ -68,10 +83,12 @@
       // (Add photos & files / Create image / Agent mode / etc.) — needed
       // for the image-gen step, which per real usage must explicitly
       // enter "Create image" mode via this menu rather than just typing
-      // a request in plain text. UNVERIFIED against live DOM (same
-      // reason as attachmentPreview above) — best-effort aria-label
-      // guesses; the menu ITEM itself is found by visible text
-      // (FA_UTILS.findByVisibleText) rather than a structural guess,
+      // a request in plain text. CONFIRMED live 2026-09-14 —
+      // `button[data-testid="composer-plus-btn"]` (aria-label "Add files
+      // and more") is exactly right — real DOM query, not yet click-
+      // tested through to the "Create image" menu item itself (see
+      // README "Known limitations"). The menu item is found by visible
+      // text (FA_UTILS.findByVisibleText) rather than a structural guess,
       // since "Create image" as literal button text is far more stable
       // across markup changes than any data-testid/class guess would be.
       plusMenuButton: [
@@ -82,17 +99,29 @@
       // Searched with FA_UTILS.findByVisibleText, not matched directly —
       // this is the set of tags that plausibly render a menu item.
       menuItemTags: '[role="menuitem"], [role="menuitemradio"], button, div',
-      // Shown while ChatGPT is still generating a response.
+      // Shown while ChatGPT is still generating a response. NOT yet
+      // confirmed against real DOM (during the 2026-09-14 live test the
+      // button visibly changed to a stop icon while generating, but its
+      // testid/aria-label wasn't queried before generation finished) —
+      // still a best-effort guess.
       stopGeneratingButton: [
         'button[data-testid="stop-button"]',
         'button[aria-label*="Stop" i]',
       ],
-      // Assistant message turns, in DOM order.
+      // Assistant message turns, in DOM order. CONFIRMED live 2026-09-14
+      // — used to extract a real, complete 3-section response, which
+      // content-chatgpt.js's real parseAnalysisResponse() then split
+      // correctly (parseConfidence: 'labeled', all 3 sections non-empty
+      // and clean — verified with the actual response text, not a
+      // simulated one).
       assistantMessages: [
         '[data-message-author-role="assistant"]',
         'div[data-testid^="conversation-turn"] [data-message-author-role="assistant"]',
       ],
-      // Generated image inside the latest assistant message (image-gen chat).
+      // Generated image inside the latest assistant message (image-gen
+      // chat). NOT yet confirmed — the image-gen step test was blocked
+      // this round by ChatGPT's free-tier "chats with files/images" rate
+      // limit (hit right after the analyze-step test — see README).
       generatedImage: [
         '[data-message-author-role="assistant"] img[src*="oaiusercontent"]',
         '[data-message-author-role="assistant"] img[alt]',
@@ -100,30 +129,69 @@
     },
     flow: {
       // Google Flow (flow.google.com) — Project creation / editor.
+      // CONFIRMED live 2026-09-14: real DOM query found this button has
+      // NO aria-label and NO data-testid — only visible text ("New
+      // project"). Both CSS candidates below were WRONG (aria was
+      // literally null). content-flow.js's ensureNewProject() now tries
+      // these first (cheap, in case a future redesign adds a real
+      // attribute) then falls back to FA_UTILS.findByVisibleText, which
+      // is what actually works today. Real click-through confirmed a
+      // genuine project gets created (real URL
+      // flow.google.com/project/<uuid>).
       newProjectButton: [
         'button[aria-label*="New project" i]',
         'a[href*="/project/"]',
       ],
-      // Image-upload input. `accept*="image"` narrows to actual image
-      // inputs (Flow's editor has more than one file input once a project
-      // is open — e.g. video/asset uploads elsewhere on the page — so the
-      // bare `input[type="file"]` alone is too easy to match the wrong
-      // one silently). Kept as the last-resort candidate, not the first.
+      // Image-upload input. NOT yet confirmed — live DOM query inside a
+      // real project found ZERO <input type="file"> elements present by
+      // default (unlike ChatGPT, which has several hidden ones already
+      // in the DOM). Flow instead exposes two real, confirmed entry
+      // points that presumably create a file input dynamically once
+      // engaged: a top-nav "Add media menu" button (opens Upload/New
+      // collection/Create character/New scene) and a composer-adjacent
+      // "Add ingredients to the prompt box" button — the latter is more
+      // likely correct for our use case (attaching the storyboard image
+      // directly to a generation prompt) but neither was click-tested
+      // through to a real file input this round (see README "Known
+      // limitations" — live interaction became unreliable partway
+      // through this investigation). `accept*="image"` narrows to actual
+      // image inputs once one does appear, since Flow's editor plausibly
+      // has more than one file input for different purposes — the bare
+      // `input[type="file"]` alone is too easy to match the wrong one
+      // silently, kept as the last-resort candidate, not the first.
       fileInput: [
         'input[type="file"][accept*="image" i]',
         'input[data-testid*="upload" i][type="file"]',
         'input[type="file"]',
       ],
+      // CONFIRMED to exist live 2026-09-14 (real aria-label queried from
+      // real DOM), NOT confirmed to actually reveal the right file input
+      // when clicked (see fileInput comment above).
       uploadDropzone: [
+        'button[aria-label="Add ingredients to the prompt box" i]',
+        'button[aria-label="Add media menu" i]',
         '[data-testid*="upload" i]',
         'button[aria-label*="upload" i]',
         'button[aria-label*="add image" i]',
       ],
+      // NOT yet confirmed against live DOM — the real prompt box found
+      // this round (`document.querySelectorAll('textarea,
+      // [contenteditable="true"]')` inside a real project) was a bare
+      // `<div class="ProseMirror">` with no id/testid/aria-label at all,
+      // same framework pattern as ChatGPT's composer but with nothing
+      // unique to anchor a selector to — only the generic
+      // `div[contenteditable="true"]` catch-all below would actually
+      // match it today. Left as-is rather than guessing a fake
+      // specific selector; worth tightening once there's a reliable way
+      // to disambiguate it from other contenteditable elements on the
+      // page (there's also a real `input[type="text"]` search box and
+      // an "Editable text"-labelled input elsewhere on the same page).
       promptField: [
         'textarea[placeholder*="prompt" i]',
         'textarea[aria-label*="prompt" i]',
         'div[contenteditable="true"][aria-label*="prompt" i]',
         'textarea',
+        'div[contenteditable="true"]',
       ],
       // No structural fallback (`button[type="submit"]` was removed — SPA
       // buttons rarely use native submit, and it risks matching an

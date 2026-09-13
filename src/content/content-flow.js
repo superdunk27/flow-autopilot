@@ -9,6 +9,7 @@
   const SEL = FA_SELECTORS.flow;
   const STEP = FA_STEPS.FLOW;
   const GENERATE_TEXT_PATTERNS = [/^generate$/i, /generate video/i, /create video/i];
+  const NEW_PROJECT_TEXT_PATTERNS = [/new project/i];
 
   function collectWarning(warnings, el, selectorList, label) {
     if (FA_UTILS.isLastResortMatch(el, selectorList)) {
@@ -23,14 +24,27 @@
     // inside a project), click it. If we're already in a project (e.g.
     // Flow navigated us there directly), this is a no-op — the upload
     // dropzone check right after will just proceed.
+    //
+    // CONFIRMED live 2026-09-14: real DOM query found the "New project"
+    // button has NO aria-label and NO data-testid at all — only visible
+    // text ("add\nNew project", the "add" being a Material icon
+    // ligature). The old aria-label-based selectors never matched
+    // anything real; findByVisibleText is the actual primary path now,
+    // CSS candidates kept only as a cheap first try in case a future
+    // redesign adds a real attribute.
     try {
-      const btn = await FA_UTILS.waitFor(SEL.newProjectButton, {
-        step: STEP,
-        description: 'ปุ่ม "New project"',
-        timeoutMs: 8000,
-      });
-      btn.click();
-      await FA_UTILS.randomDelay(800, 1500);
+      let btn = null;
+      for (const sel of SEL.newProjectButton) {
+        try {
+          btn = document.querySelector(sel);
+        } catch (_) { /* ignore invalid selector */ }
+        if (btn) break;
+      }
+      if (!btn) btn = FA_UTILS.findByVisibleText('button, a', NEW_PROJECT_TEXT_PATTERNS);
+      if (btn) {
+        btn.click();
+        await FA_UTILS.randomDelay(800, 1500);
+      }
     } catch (_) {
       // not present — assume we're already in a project context
     }

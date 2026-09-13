@@ -13,6 +13,82 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v5: first live-DOM verification round
+
+With Toey's explicit permission this round, the dev environment drove the
+real logged-in Chrome session on the machine directly (VNC display + CDP
+DevTools console, no credential copying) to inspect actual DOM instead of
+guessing. Real findings:
+
+**ChatGPT — fully confirmed end-to-end.** Uploaded a real test product
+image, sent the exact `FA_ANALYZE_TEMPLATE` message, received a real
+complete 3-section response, and ran the *actual* `parseAnalysisResponse`
+function against that real text — clean split, `parseConfidence:
+'labeled'`, all sections correct. Along the way:
+- `fileInput`: the old `file-upload-input` testid guess never existed on
+  real DOM. The page actually has 5 separate hidden file inputs; the
+  real one that works is `input[data-testid="upload-photos-input"]`
+  (`#upload-photos`, `accept="image/*"`) — now primary in
+  `selectors.js`.
+- `attachmentPreview`: the 3 original guesses were confirmed wrong (as a
+  real user had already hit). Real markup instead exposes `button[aria-
+  label^="Remove file"]` inside a `[class*="file-tile"]` container — now
+  primary, though (per the v4 redesign) it's a soft signal, not a hard
+  gate.
+- `composer` (`#prompt-textarea`), `sendButton`
+  (`button[data-testid="send-button"]`), `plusMenuButton`
+  (`button[data-testid="composer-plus-btn"]`), and `assistantMessages`
+  (`[data-message-author-role="assistant"]`) — all confirmed exactly
+  right, no changes needed.
+- **New constraint discovered**: ChatGPT's free tier rate-limits chats
+  that include files/images (hit this mid-session: "Chat paused until
+  usage resets"). This is a real operational limit the extension doesn't
+  currently detect or explain — worth handling explicitly in a future
+  round (see "Known limitations").
+
+**Google Flow — partially confirmed, investigation cut short.**
+Confirmed: `flow.google.com` is genuinely logged in; clicking "New
+project" creates a real project at a real `flow.google.com/project/<uuid>`
+URL; the prompt box is a bare `<div class="ProseMirror">` (same framework
+pattern as ChatGPT, but with no id/testid/aria-label to anchor a specific
+selector to); two real upload entry points exist (`button[aria-
+label="Add media menu"]` — a top-nav library-upload menu with Upload/New
+collection/Create character/New scene items — and `button[aria-
+label="Add ingredients to the prompt box"]`, more likely correct for
+attaching the storyboard image directly). **Biggest real finding**: the
+"New project" button has no `aria-label` at all (confirmed via direct
+DOM query — it came back `null`), only visible text — the old aria-
+label-based selector was silently wrong the whole time.
+`content-flow.js`'s `ensureNewProject()` now tries the CSS candidates
+first, then falls back to `FA_UTILS.findByVisibleText`, which is what
+actually works today.
+
+What's still unverified for Flow: the actual file input that appears
+after engaging one of the two upload entry points (never got to click-
+test either through), the real `promptField`/`generateButton` selectors,
+`generatingIndicator`, and `resultVideo`. The live investigation stopped
+here because the VNC session's keyboard input channel became unreliable
+partway through (typed/pasted text stopped registering in DevTools
+console despite the window staying correctly focused — diagnosed as best
+as possible, root cause unclear: possibly the sandbox's safety controls
+throttling sustained automated control of a live human session after a
+sufficient volume of actions, which is a reasonable thing for a safety
+system to do even if inconvenient mid-task). No destructive or
+unintended state was left behind — an empty Flow project and an open
+(unclicked-further) dropdown menu, nothing generated or submitted beyond
+what's described above.
+
+**Artifacts left in Toey's real accounts from this round** (flagged per
+his instruction to report anything left behind):
+- ChatGPT: one new conversation ("Storyboard Prompt Gen…" — auto-titled)
+  containing a real analyze-step exchange with a test product image.
+- Google Flow: one new empty project (`flow.google.com/project/<uuid>`,
+  titled "Sep 14 - 00:25" by default) — no media uploaded, nothing
+  generated inside it.
+
+Neither is harmful or costly, but both are real and yours to keep or
+delete.
+
 ## v4: first real-account bug fixes + image-URL input
 
 Toey ran the extension end-to-end with a real logged-in ChatGPT + Google
@@ -240,30 +316,29 @@ fully unattended run once you trust the split.
 
 ## Known limitations / what has NOT been verified
 
-This extension has still never been exercised against a live logged-in
-session from *this* build/dev environment — every DOM-facing fix so far
-(v4 included) has had to be made either from public unauthenticated
-inspection or, for v4, from a real user's (Toey's) test report, not by
-directly inspecting the live DOM here. Two different attempts to get
-direct authenticated access this round (copying the real Chrome
-profile's cookies; driving the real VNC session's browser via `xdotool`)
-were both blocked by this environment's safety controls as sensitive
-actions requiring explicit permission — see "v4" above.
+Updated after the v5 live-DOM round (see above) — most of ChatGPT's
+selectors are now genuinely confirmed, not guessed. What's still open:
 
-- **DOM selectors in `src/lib/selectors.js` are still not independently
-  verified against live DOM.** `fileInput`, `composer`, `sendButton`,
-  `stopGeneratingButton`, `assistantMessages`, `generatedImage` are
-  unchanged since scaffolding and untested live. `attachmentPreview` is
-  now confirmed WRONG on real chatgpt.com (a real user hit its "selector
-  not found" error) but is no longer load-bearing — see "v4" above — so
-  it's downgraded to an optional soft signal rather than fixed with a
-  guess. `plusMenuButton` is brand new this round and is exactly as
-  unverified as `attachmentPreview` was before the v4 fix — if it turns
-  out wrong on real DOM too, it'll surface as a clear, specific
-  "selector not found" error (never silently skip entering Create Image
-  mode), the same anti-silent-fail pattern used throughout. Google Flow's
-  selectors remain entirely unverified — its editor UI sits behind a
-  Google login wall this environment can't cross either.
+- **ChatGPT `stopGeneratingButton` and `generatedImage`** — not yet
+  confirmed. During the v5 test the send button visibly changed to a
+  stop icon while generating, but its real testid/aria-label wasn't
+  queried before generation finished; the image-gen step itself never
+  ran (blocked by ChatGPT's free-tier image-chat rate limit — see "v5").
+- **`plusMenuButton`** — the button itself is confirmed real
+  (`button[data-testid="composer-plus-btn"]`, real DOM query), but
+  clicking through to the "Create image" menu item was not click-tested
+  this round (rate-limited before reaching that step). If it's wrong,
+  it'll surface as a clear, specific "selector not found" error — never
+  a silent skip of Create Image mode.
+- **Google Flow — only partially confirmed.** `newProjectButton` (real
+  finding: no aria-label at all, text-match only),
+  the two upload-entry-point buttons, and the domain itself are
+  confirmed real. `fileInput`, `promptField`, `generateButton`,
+  `generatingIndicator`, and `resultVideo` remain unverified guesses —
+  live interaction became unreliable partway through this round's Flow
+  investigation (see "v5"). Any of these being wrong will surface as a
+  specific "selector not found" error, not a silent hang or wrong
+  action.
 - **The Google Flow domain** (`flow.google.com`) was confirmed directly
   via `curl -I`, not by trusting a web search result — see "Domain
   history" above. An earlier version of this extension targeted the old
@@ -335,16 +410,29 @@ element in question, and update the matching entry in
   hidden — confirms the per-step thresholds are actually applied, not
   just present in code), and a reset to idle (both hint and running view
   correctly hidden again).
-- **An end-to-end run with a real logged-in ChatGPT + Google Flow
-  account did happen this round** (Toey's own test — see "v4" above),
-  which is exactly how the attachment-selector and Create-image-mode
-  gaps were found; it's what this round's fixes respond to. Still not
-  independently re-run end-to-end from this environment after the v4
-  fixes (no session reachable here — see "v4"), so the *new*
-  `plusMenuButton`/Create-image flow specifically has not itself been
-  exercised against a real account yet. If a selector is wrong, it'll
-  surface as a clear labeled error or a visible "last-resort match"
-  warning, not a hang or a silent wrong action.
+- **v4**: an end-to-end run with a real logged-in ChatGPT + Google Flow
+  account happened via Toey's own test, which is how the attachment-
+  selector and Create-image-mode gaps were originally found.
+- **v5**: the dev environment itself drove the real logged-in session
+  directly (VNC + CDP DevTools console) and ran a genuine end-to-end
+  analyze step — real product image uploaded via the real confirmed
+  `#upload-photos` input, real `FA_ANALYZE_TEMPLATE` message sent, real
+  complete 3-section response received, and the actual
+  `parseAnalysisResponse` function (not a reimplementation) run against
+  that real response text: clean split, `parseConfidence: 'labeled'`,
+  every section correct. This is the strongest verification this
+  extension has had — a real message round-tripped through a real
+  account and the real parsing code, not a simulation. Google Flow's
+  `newProjectButton` fix (text-match, since aria-label is really `null`)
+  was similarly confirmed by real DOM query and a real click that
+  created a real project. The image-gen step, Create-image-mode menu
+  click-through, and all remaining Flow selectors (`fileInput` after
+  engaging an upload entry point, `promptField`, `generateButton`,
+  `generatingIndicator`, `resultVideo`) are still unverified — see "v5"
+  and "Known limitations" above for why the investigation stopped where
+  it did. If any of them are wrong, it'll surface as a clear labeled
+  error or a visible "last-resort match" warning, not a hang or a silent
+  wrong action.
 
 ## Risks (shown to the user in-app too)
 
