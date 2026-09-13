@@ -10,14 +10,12 @@ const views = {
   done: document.getElementById('doneView'),
 };
 
-const setupWarning = document.getElementById('setupWarning');
 const productImageInput = document.getElementById('productImage');
 const fileLabel = document.getElementById('fileLabel');
 const preview = document.getElementById('preview');
 const runBtn = document.getElementById('runBtn');
 
 let selectedImageDataUrl = null;
-let currentOptions = null;
 
 function showView(name) {
   Object.entries(views).forEach(([key, el]) => {
@@ -45,14 +43,10 @@ productImageInput.addEventListener('change', async () => {
 });
 
 function updateRunButton() {
-  runBtn.disabled = !selectedImageDataUrl || !currentOptions?.customGptUrl;
+  runBtn.disabled = !selectedImageDataUrl;
 }
 
 document.getElementById('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage());
-document.getElementById('setupLink').addEventListener('click', (e) => {
-  e.preventDefault();
-  chrome.runtime.openOptionsPage();
-});
 
 runBtn.addEventListener('click', () => {
   chrome.runtime.sendMessage({ type: FA_MSG.START_RUN, payload: { productImageDataUrl: selectedImageDataUrl } });
@@ -88,7 +82,6 @@ const STEP_LABELS = {
   analyze: 'ขั้น 1/3 — ChatGPT วิเคราะห์สินค้า',
   imagegen: 'ขั้น 2/3 — ChatGPT สร้างภาพ storyboard',
   flow: 'ขั้น 3/3 — Google Flow สร้างวิดีโอ',
-  setup: 'ตั้งค่า',
 };
 
 function renderReview(run) {
@@ -173,9 +166,7 @@ async function getRun() {
 }
 
 async function init() {
-  const { run, options } = await chrome.runtime.sendMessage({ type: FA_MSG.GET_STATE });
-  currentOptions = options;
-  setupWarning.hidden = !!options?.customGptUrl;
+  const { run } = await chrome.runtime.sendMessage({ type: FA_MSG.GET_STATE });
   updateRunButton();
   render(run);
 }
@@ -183,11 +174,6 @@ async function init() {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes[FA_STORAGE_KEYS.RUN]) {
     render(changes[FA_STORAGE_KEYS.RUN].newValue);
-  }
-  if (area === 'local' && changes[FA_STORAGE_KEYS.OPTIONS]) {
-    currentOptions = { ...FA_DEFAULT_OPTIONS, ...changes[FA_STORAGE_KEYS.OPTIONS].newValue };
-    setupWarning.hidden = !!currentOptions.customGptUrl;
-    updateRunButton();
   }
 });
 

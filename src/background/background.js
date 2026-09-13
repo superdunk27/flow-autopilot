@@ -65,15 +65,11 @@ async function sendMessageWithRetry(tabId, message, { timeoutMs = 20000, interva
 
 async function startAnalyzeStep(productImageDataUrl) {
   const opts = await getOptions();
-  if (!opts.customGptUrl) {
-    await fail(
-      'setup',
-      'ยังไม่ได้ตั้งค่า custom GPT URL',
-      'เปิดหน้า Options ของ extension แล้ววาง URL ของ custom GPT ที่ใช้วิเคราะห์สินค้า (เช่น https://chatgpt.com/g/g-xxxxx-...)'
-    );
-    return;
-  }
-  const tabId = await openTab(opts.customGptUrl);
+  // No custom GPT required as of v2 — plain chatgpt.com new chat, with
+  // the analysis instructions riding along as a user message instead of
+  // a custom GPT's system prompt (free accounts can't create custom
+  // GPTs). See ψ/active/flow-autopilot-extension.md "Update v2".
+  const tabId = await openTab('https://chatgpt.com/');
   await setRun({
     status: FA_STATUS.RUNNING,
     currentStep: FA_STEPS.ANALYZE,
@@ -89,7 +85,7 @@ async function startAnalyzeStep(productImageDataUrl) {
         mode: FA_STEPS.ANALYZE,
         stepLabel: FA_STEPS.ANALYZE,
         productImageDataUrl,
-        promptText: opts.analyzeTriggerMessage,
+        promptText: `${opts.analyzeTemplate}\n\n${FA_ANALYZE_TRAILER}`,
       },
     });
   } catch (err) {

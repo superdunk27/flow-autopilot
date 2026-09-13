@@ -1,6 +1,8 @@
 // Flow Autopilot — content script for chatgpt.com.
 // Handles two modes, driven by messages from the background service
-// worker: "analyze" (custom GPT product analysis) and "imagegen"
+// worker, both on a plain chatgpt.com new chat (no custom GPT — see
+// FA_ANALYZE_TEMPLATE in lib/messages.js): "analyze" (product-photo
+// analysis, instructions sent as a regular message) and "imagegen"
 // (default ChatGPT image generation from the storyboard prompt).
 //
 // Depends on globals from lib/messages.js, lib/selectors.js and
@@ -54,19 +56,24 @@
   }
 
   /**
-   * Splits the custom GPT's analysis reply into the 3 sections the spec
-   * needs: product details / storyboard prompt / video prompt. Uses a
-   * heuristic label match first; falls back to splitting the text into 3
-   * roughly-equal paragraph groups so the pipeline still has *something*
-   * to show the user in the review step rather than crashing outright —
-   * the review step (see popup) always lets the user fix a bad split by
+   * Splits the analysis reply into the 3 sections FA_ANALYZE_TEMPLATE asks
+   * for: product description / storyboard image prompt / video animation
+   * prompt. Since v2 sends that exact template as a plain message (no
+   * custom GPT), we know the model is asked for literal "1. Product
+   * Description" / "2. Storyboard Image Prompt" / "3. Video Animation
+   * Prompt" headings — matched first, with the older looser Thai/English
+   * heuristics kept as secondary alternatives in case the model doesn't
+   * echo the heading text exactly. Falls back to splitting the text into
+   * 3 roughly-equal paragraph groups so the pipeline still has
+   * *something* to show in the review step rather than crashing outright
+   * — the review step (see popup) always lets the user fix a bad split by
    * hand, so this fallback is safe, never silently wrong.
    */
   function parseAnalysisResponse(text) {
     const labelPatterns = [
-      { key: 'productDetails', re: /(รายละเอียดสินค้า|product details?)[:：]?/i },
-      { key: 'storyboardPrompt', re: /(storyboard[^:：]*prompt|prompt.*storyboard|prompt สำหรับ.*storyboard)[:：]?/i },
-      { key: 'videoPrompt', re: /(prompt.*วิดีโอ|video prompt|prompt สำหรับ.*วิดีโอ)[:：]?/i },
+      { key: 'productDetails', re: /(1\.\s*product description|รายละเอียดสินค้า|product details?)[:：]?/i },
+      { key: 'storyboardPrompt', re: /(2\.\s*storyboard image prompt|storyboard[^:：]*prompt|prompt.*storyboard|prompt สำหรับ.*storyboard)[:：]?/i },
+      { key: 'videoPrompt', re: /(3\.\s*video animation prompt|prompt.*วิดีโอ|video prompt|prompt สำหรับ.*วิดีโอ)[:：]?/i },
     ];
 
     const matches = labelPatterns
