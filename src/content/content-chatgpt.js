@@ -9,11 +9,20 @@
 (function () {
   const SEL = FA_SELECTORS.chatgpt;
 
-  async function attachAndSend({ step, productImageDataUrl, promptText }) {
+  function collectWarning(warnings, el, selectorList, label) {
+    if (FA_UTILS.isLastResortMatch(el, selectorList)) {
+      warnings.push(
+        `⚠️ ${label}: จับคู่ด้วย selector ทั่วไปที่สุด (last-resort) — อาจได้ element ผิด โปรดตรวจผลลัพธ์`
+      );
+    }
+  }
+
+  async function attachAndSend({ step, productImageDataUrl, promptText, warnings }) {
     const fileInput = await FA_UTILS.waitFor(SEL.fileInput, {
       step,
       description: 'ช่องแนบไฟล์ (file input) ของ ChatGPT',
     });
+    collectWarning(warnings, fileInput, SEL.fileInput, 'ช่องแนบไฟล์');
     const file = FA_UTILS.dataUrlToFile(productImageDataUrl, 'product.png');
     await FA_UTILS.attachFileToInput(fileInput, file);
 
@@ -112,19 +121,21 @@
   }
 
   async function runAnalyze(payload) {
-    await attachAndSend({ step: FA_STEPS.ANALYZE, ...payload });
+    const warnings = [];
+    await attachAndSend({ step: FA_STEPS.ANALYZE, ...payload, warnings });
     const raw = extractLastAssistantText();
     const parsed = parseAnalysisResponse(raw);
     chrome.runtime.sendMessage({
       type: FA_MSG.STEP_DONE,
       step: FA_STEPS.ANALYZE,
       ok: true,
-      payload: { raw, ...parsed },
+      payload: { raw, ...parsed, warnings },
     });
   }
 
   async function runImageGen(payload) {
-    await attachAndSend({ step: FA_STEPS.IMAGEGEN, ...payload });
+    const warnings = [];
+    await attachAndSend({ step: FA_STEPS.IMAGEGEN, ...payload, warnings });
     const imgEl = await FA_UTILS.waitFor(SEL.generatedImage, {
       step: FA_STEPS.IMAGEGEN,
       description: 'ภาพ storyboard ที่ ChatGPT สร้าง',
@@ -135,7 +146,7 @@
       type: FA_MSG.STEP_DONE,
       step: FA_STEPS.IMAGEGEN,
       ok: true,
-      payload: { imageDataUrl },
+      payload: { imageDataUrl, warnings },
     });
   }
 

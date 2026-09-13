@@ -51,16 +51,56 @@ popup (UI)  <--chrome.storage.local (faRun)-->  background.js (orchestrator)
 - **`src/content/content-chatgpt.js`** — runs on `chatgpt.com`. Handles
   both the analyze step (custom GPT) and the image-gen step (default
   ChatGPT), driven by the `mode` field in the message it receives.
-- **`src/content/content-flow.js`** — runs on `labs.google/*` (Google
-  Flow lives at `labs.google/fx/tools/flow`). Uploads the storyboard
-  image, submits the video prompt, waits for Veo, extracts the result.
+- **`src/content/content-flow.js`** — runs on `flow.google.com` (Google
+  Flow's app now lives there — see "Domain history" below). Uploads the
+  storyboard image, submits the video prompt, waits for Veo, extracts the
+  result.
 - **`src/lib/selectors.js`** — the single file to edit when a site's DOM
   changes and a step starts throwing "selector not found". Each element
-  has a list of candidate selectors tried in order.
+  has a list of candidate selectors tried in order, most specific first,
+  broadest structural fallback last.
 - **`src/lib/dom-utils.js`** — shared helpers: `waitFor()` (poll with a
   descriptive timeout error), file-input attachment via `DataTransfer`,
   React-safe value setting, contenteditable typing, generation-complete
-  polling.
+  polling, `findByVisibleText()` (matches an element by its rendered text
+  instead of a structural guess), and `isLastResortMatch()` (flags when a
+  `waitFor()` call only matched because of the broadest fallback
+  candidate — see "Selector specificity" below).
+
+### Domain history
+
+Google Flow moved from `labs.google/fx/tools/flow` to `flow.google.com`.
+Confirmed directly (not by trusting a search result) on 2026-09-13:
+`curl -sI https://labs.google/fx/tools/flow` returns an HTTP 308 redirect
+to `https://flow.google.com/`, and every `/shared/tool/<id>` sub-path
+308s the same way — it's a full migration, not a partial one, even though
+Google's own `/about` marketing page still links a few "Tools" cards to
+the old `labs.google` URLs (the server-side redirect covers it either
+way). `manifest.json`'s `host_permissions` and `content_scripts.matches`
+target `flow.google.com` accordingly. A login-redirect probe
+(`accounts.google.com/...&continue=https://flow.google.com/`) further
+confirmed the authenticated app itself resolves back to `flow.google.com`
+after sign-in, not some other subdomain.
+
+### Selector specificity
+
+A selector list matching *something* isn't the same as matching the
+*right* something — `input[type="file"]` as a first-choice candidate can
+silently grab the wrong file input on a page with more than one, without
+ever throwing. Two mitigations, not just reordering:
+
+1. Structural guesses that were too broad to trust as primary candidates
+   (e.g. `button[type="submit"]` for Flow's Generate button) were removed
+   or pushed to last resort. Where a purely structural fallback would
+   otherwise be needed, `findByVisibleText()` matches on the button's
+   actual rendered text (e.g. "Generate") instead — more specific than a
+   tag/attribute guess, since it's checking what a human would read.
+2. `waitFor()` tags the element it found with which candidate matched.
+   If only the broadest, last-resort candidate matched, the content
+   script attaches a visible warning to that step's result instead of
+   proceeding silently — surfaced in the popup as a yellow banner (`faRun
+   .warnings`) so a risky match is something the user actually sees, not
+   a thing hidden behind a `true` return value.
 - **`src/popup/`**, **`src/options/`** — UI. The popup is a pure renderer
   of `faRun` state (`idle` / `running` / `awaiting_review` / `error` /
   `done`); it never contains pipeline logic itself.
@@ -85,17 +125,27 @@ environment, so:
 
 - **DOM selectors in `src/lib/selectors.js` are a first draft**, based on
   public inspection of ChatGPT/Flow markup, not exercised against a real
-  logged-in session. They are very likely to need adjustment — that's
-  exactly why they live in one file with multiple fallback candidates
-  each, and why every failure mode surfaces a specific, actionable error
-  instead of failing silently.
-- **The Google Flow domain** was confirmed to be `labs.google` (path
-  `/fx/tools/flow`, projects at `/fx/tools/flow/project/<id>`) via public
-  web search, not by visiting it with a logged-in account.
-- **What *was* verified**: `manifest.json` loads cleanly in a real Chrome
-  instance via `--load-extension` with no console errors (see
-  `Testing done so far` below), all JS files have valid syntax, and the
-  popup/options UI render and interact correctly.
+  logged-in session (no such session is available in this build
+  environment) — the actual editor UI (upload input, prompt field,
+  Generate button) sits behind a Google login wall that couldn't be
+  crossed here. They are very likely to need adjustment — that's exactly
+  why they live in one file with multiple fallback candidates each, why
+  the most generic candidate is deliberately last instead of first, and
+  why matching only that last-resort candidate now surfaces a visible
+  warning in the popup instead of proceeding silently (see "Selector
+  specificity" above).
+- **The Google Flow domain** (`flow.google.com`) was confirmed directly
+  via `curl -I`, not by trusting a web search result — see "Domain
+  history" above. An earlier version of this extension targeted the old
+  `labs.google/fx/tools/flow` domain based on a search result alone; that
+  was wrong (the domain had migrated) and was caught in review before any
+  end-to-end use.
+- **What *was* verified**: `manifest.json` loads cleanly and its actual
+  background service worker executes (confirmed via Chrome DevTools
+  Protocol against the running extension's real ID — see below), all JS
+  files have valid syntax, and popup/options render without console
+  errors. Content-script injection was checked on both live target
+  domains (`chatgpt.com`, `flow.google.com`) with no script errors.
 
 If you hit a "selector not found" error when actually running this
 against real ChatGPT/Flow pages: open dev tools on that tab, inspect the
@@ -106,15 +156,29 @@ element in question, and update the matching entry in
 
 - `node --check` on every `.js` file (syntax validity).
 - `manifest.json` schema sanity (valid JSON, required MV3 fields present).
-- Loaded unpacked in a real `google-chrome` instance via
-  `--load-extension`; verified the extension installs without manifest
-  errors, the service worker starts, and the popup/options pages render
-  without console errors.
+- Loaded unpacked and verified the actual background service worker
+  executes via Chrome DevTools Protocol against its real extension ID
+  (`chrome.runtime.getManifest().name`, listener registration checked
+  directly, not inferred from log absence). **Caveat that caught a real
+  bug**: `google-chrome-stable` silently ignores `--load-extension` as of
+  Chrome 137+ (a branded-Chrome restriction) — an early smoke test looked
+  clean (exit 0, no console errors) purely because the extension had
+  never actually loaded. Cross-checked against `chrome://extensions`
+  internal state and switched to a Chrome for Testing build, where the
+  flag genuinely works, to get a real result.
+- Content scripts confirmed to inject without console errors on both
+  live target domains: `chatgpt.com` and `flow.google.com` (checked via
+  CDP `Runtime`/`Log` domains on real navigations to those URLs, not a
+  proxy check).
+- Domain migration verified with `curl -I` against the live redirect
+  (`labs.google/fx/tools/flow` → 308 → `flow.google.com`), not by
+  re-trusting the earlier web-search result that had gone stale.
 - **Not yet tested**: an actual end-to-end run against logged-in
-  ChatGPT + Google Flow accounts (no such session was available in this
-  environment). Please test with your own account per the original
-  task — if a selector is wrong, it'll surface as a clear labeled error,
-  not a hang.
+  ChatGPT + Google Flow accounts (no such session is available in this
+  environment — the editor UI is behind a Google login wall). Please
+  test with your own account per the original task — if a selector is
+  wrong, it'll surface as a clear labeled error or a visible "last-resort
+  match" warning, not a hang or a silent wrong action.
 
 ## Risks (shown to the user in-app too)
 

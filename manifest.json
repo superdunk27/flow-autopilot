@@ -3,10 +3,10 @@
   "name": "Flow Autopilot",
   "version": "0.1.0",
   "description": "Automate ChatGPT product analysis -> ChatGPT image-gen storyboard -> Google Flow (Veo) video, using your own logged-in browser sessions. 100% client-side, no server, no shared credentials.",
-  "permissions": ["storage", "tabs", "scripting", "notifications"],
+  "permissions": ["storage", "notifications"],
   "host_permissions": [
     "https://chatgpt.com/*",
-    "https://labs.google/*"
+    "https://flow.google.com/*"
   ],
   "background": {
     "service_worker": "src/background/background.js"
@@ -39,7 +39,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://labs.google/*"],
+      "matches": ["https://flow.google.com/*"],
       "js": [
         "src/lib/messages.js",
         "src/lib/selectors.js",

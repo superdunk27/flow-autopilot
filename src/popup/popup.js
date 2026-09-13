@@ -123,7 +123,19 @@ function addTextarea(container, field, labelText, value) {
   container.appendChild(ta);
 }
 
+function renderWarnings(run) {
+  const banner = document.getElementById('warningsBanner');
+  const warnings = run?.warnings || [];
+  if (!warnings.length) {
+    banner.hidden = true;
+    return;
+  }
+  banner.hidden = false;
+  banner.innerHTML = warnings.map((w) => `<div>${w}</div>`).join('');
+}
+
 function render(run) {
+  renderWarnings(run);
   if (!run || run.status === 'idle' || !run.status) {
     showView('idle');
     updateRunButton();

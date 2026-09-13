@@ -38,16 +38,32 @@
    * Poll `document.querySelector` across a list of candidate selectors
    * until one matches (or `timeoutMs` elapses). Never silently returns
    * null — throws a descriptive FASelectorError instead.
+   *
+   * The matched element is tagged with `__faMatchedSelector` and
+   * `__faMatchedIndex` so callers can tell whether a *specific* candidate
+   * matched (index 0/1) vs. the broadest last-resort one — matching on a
+   * generic fallback isn't wrong by itself, but a caller can use this to
+   * surface a visible warning instead of the risk being silent (see
+   * `isLastResortMatch` below).
    */
   function waitFor(selectorList, { step, description, timeoutMs = 20000, pollMs = 250, root: searchRoot = document }) {
     const list = Array.isArray(selectorList) ? selectorList : [selectorList];
     const start = Date.now();
     return new Promise((resolve, reject) => {
       const tick = () => {
-        for (const sel of list) {
+        for (let i = 0; i < list.length; i++) {
+          const sel = list[i];
           try {
             const el = searchRoot.querySelector(sel);
-            if (el) return resolve(el);
+            if (el) {
+              try {
+                el.__faMatchedSelector = sel;
+                el.__faMatchedIndex = i;
+              } catch (_) {
+                // some elements (rare) may not accept expando props; ignore
+              }
+              return resolve(el);
+            }
           } catch (_) {
             // invalid selector on this page, ignore and keep trying others
           }
@@ -60,6 +76,38 @@
       };
       tick();
     });
+  }
+
+  /** True when `el` (from `waitFor`) matched only the broadest, last-resort
+   * candidate in its selector list — i.e. the specific candidates all
+   * missed and we fell back to a generic match that *could* be the wrong
+   * element. Used to turn "matched something, might be wrong" into a
+   * visible warning instead of a silent risk. */
+  function isLastResortMatch(el, selectorList) {
+    const list = Array.isArray(selectorList) ? selectorList : [selectorList];
+    return list.length > 1 && el.__faMatchedIndex === list.length - 1;
+  }
+
+  /**
+   * Finds the first *visible* element matching `tagSelector` whose
+   * innerText matches one of `textPatterns` (RegExps). More specific than
+   * a bare structural guess like `button[type="submit"]` — matching on
+   * what a human would actually read on the button, not just its tag/type.
+   * Returns null (does not throw) if nothing matches; callers decide
+   * whether that's fatal.
+   */
+  function findByVisibleText(tagSelector, textPatterns, { root: searchRoot = document } = {}) {
+    const patterns = Array.isArray(textPatterns) ? textPatterns : [textPatterns];
+    const candidates = Array.from(searchRoot.querySelectorAll(tagSelector));
+    for (const el of candidates) {
+      const text = (el.innerText || el.textContent || '').trim();
+      if (!text) continue;
+      const rect = el.getBoundingClientRect();
+      const visible = rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+      if (!visible) continue;
+      if (patterns.some((re) => re.test(text))) return el;
+    }
+    return null;
   }
 
   /**
@@ -197,6 +245,8 @@
     sleep,
     randomDelay,
     waitFor,
+    isLastResortMatch,
+    findByVisibleText,
     waitForDisappearance,
     waitForGenerationComplete,
     dataUrlToFile,

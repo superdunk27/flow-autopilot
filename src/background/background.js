@@ -80,6 +80,7 @@ async function startAnalyzeStep(productImageDataUrl) {
     productImageDataUrl,
     tabIds: { analyze: tabId },
     error: null,
+    warnings: [],
   });
   try {
     await sendMessageWithRetry(tabId, {
@@ -123,7 +124,7 @@ async function startImageGenStep(storyboardPrompt) {
 
 async function startFlowStep(videoPrompt) {
   const run = await getRun();
-  const tabId = await openTab('https://labs.google/fx/tools/flow');
+  const tabId = await openTab('https://flow.google.com/');
   await setRun({
     status: FA_STATUS.RUNNING,
     currentStep: FA_STEPS.FLOW,
@@ -205,12 +206,21 @@ async function handleMessage(message, sender) {
   }
 }
 
+async function appendWarnings(step, newWarnings) {
+  if (!newWarnings || !newWarnings.length) return;
+  const run = await getRun();
+  const tagged = newWarnings.map((w) => `[${step}] ${w}`);
+  await setRun({ warnings: [...(run?.warnings || []), ...tagged] });
+}
+
 async function handleStepDone(message) {
   const { step, ok, payload, error } = message;
   if (!ok) {
     await fail(step, error?.message || 'unknown error', error?.selectorsTried ? `Selectors tried: ${error.selectorsTried.join(', ')}` : undefined);
     return;
   }
+
+  await appendWarnings(step, payload.warnings);
 
   const opts = await getOptions();
 
