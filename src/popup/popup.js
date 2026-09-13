@@ -14,8 +14,13 @@ const productImageInput = document.getElementById('productImage');
 const fileLabel = document.getElementById('fileLabel');
 const preview = document.getElementById('preview');
 const runBtn = document.getElementById('runBtn');
+const imageUrlInput = document.getElementById('imageUrlInput');
+const loadUrlBtn = document.getElementById('loadUrlBtn');
+const urlError = document.getElementById('urlError');
 
 let selectedImageDataUrl = null;
+let currentRun = null;
+let stuckCheckTimer = null;
 
 function showView(name) {
   Object.entries(views).forEach(([key, el]) => {
@@ -32,14 +37,82 @@ function fileToDataUrl(file) {
   });
 }
 
+function setSelectedImage(dataUrl, label) {
+  selectedImageDataUrl = dataUrl;
+  fileLabel.textContent = label;
+  preview.src = dataUrl;
+  preview.hidden = false;
+  updateRunButton();
+}
+
 productImageInput.addEventListener('change', async () => {
   const file = productImageInput.files[0];
   if (!file) return;
-  selectedImageDataUrl = await fileToDataUrl(file);
-  fileLabel.textContent = file.name;
-  preview.src = selectedImageDataUrl;
-  preview.hidden = false;
-  updateRunButton();
+  const dataUrl = await fileToDataUrl(file);
+  setSelectedImage(dataUrl, file.name);
+});
+
+function showUrlError(message) {
+  urlError.textContent = message;
+  urlError.hidden = !message;
+}
+
+loadUrlBtn.addEventListener('click', async () => {
+  const url = imageUrlInput.value.trim();
+  showUrlError('');
+  if (!url) {
+    showUrlError('ใส่ URL รูปภาพก่อน');
+    return;
+  }
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (_) {
+    showUrlError('URL ไม่ถูกต้อง');
+    return;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    showUrlError('รองรับเฉพาะ URL แบบ http(s)');
+    return;
+  }
+
+  loadUrlBtn.disabled = true;
+  loadUrlBtn.textContent = '…';
+  try {
+    // Fetching an arbitrary user-supplied origin from the popup needs a
+    // host permission we don't declare upfront (manifest keeps
+    // host_permissions minimal — see PR #1 review). Request it only when
+    // this feature is actually used, gated on this click's user gesture,
+    // rather than asking for <all_urls> at install time for everyone.
+    const granted = await chrome.permissions.request({ origins: ['<all_urls>'] });
+    if (!granted) {
+      showUrlError('ต้องอนุญาต permission ก่อนถึงจะโหลดรูปจาก URL ภายนอกได้');
+      return;
+    }
+    const resp = await fetch(parsed.href);
+    if (!resp.ok) {
+      showUrlError(`โหลดรูปไม่สำเร็จ (HTTP ${resp.status})`);
+      return;
+    }
+    const contentType = resp.headers.get('content-type') || '';
+    if (!contentType.startsWith('image/')) {
+      showUrlError(`URL นี้ไม่ใช่รูปภาพ (content-type: ${contentType || 'ไม่ทราบ'})`);
+      return;
+    }
+    const blob = await resp.blob();
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    setSelectedImage(dataUrl, parsed.pathname.split('/').pop() || 'image-from-url');
+  } catch (err) {
+    showUrlError(`โหลดรูปไม่สำเร็จ: ${err.message || err}`);
+  } finally {
+    loadUrlBtn.disabled = false;
+    loadUrlBtn.textContent = 'โหลด';
+  }
 });
 
 function updateRunButton() {
@@ -127,8 +200,42 @@ function renderWarnings(run) {
   banner.innerHTML = warnings.map((w) => `<div>${w}</div>`).join('');
 }
 
+// A running step past this age is very likely stuck rather than still
+// legitimately working — comfortably above each step's own internal
+// generation-wait timeout (5 min for chatgpt.com steps, 10 min for
+// Flow's video), but below background.js's hard ceiling (see
+// CHATGPT_STEP_CEILING_MS / FLOW_STEP_CEILING_MS), so the user gets an
+// early, actionable warning before the automatic failure kicks in.
+const STUCK_THRESHOLD_MS = {
+  analyze: 6 * 60 * 1000,
+  imagegen: 6 * 60 * 1000,
+  flow: 9 * 60 * 1000,
+};
+
+function updateStuckHint() {
+  const stuckHint = document.getElementById('stuckHint');
+  if (!currentRun || currentRun.status !== 'running') {
+    stuckHint.hidden = true;
+    return;
+  }
+  const threshold = STUCK_THRESHOLD_MS[currentRun.currentStep] ?? 6 * 60 * 1000;
+  const elapsed = Date.now() - (currentRun.updatedAt || Date.now());
+  stuckHint.hidden = elapsed <= threshold;
+}
+
+function setRunningPoll(active) {
+  if (active && !stuckCheckTimer) {
+    stuckCheckTimer = setInterval(updateStuckHint, 15000);
+  } else if (!active && stuckCheckTimer) {
+    clearInterval(stuckCheckTimer);
+    stuckCheckTimer = null;
+  }
+}
+
 function render(run) {
+  currentRun = run;
   renderWarnings(run);
+  setRunningPoll(run?.status === 'running');
   if (!run || run.status === 'idle' || !run.status) {
     showView('idle');
     updateRunButton();
@@ -137,6 +244,7 @@ function render(run) {
   if (run.status === 'running') {
     showView('running');
     document.getElementById('runningLabel').textContent = STEP_LABELS[run.currentStep] || 'กำลังทำงาน…';
+    updateStuckHint();
     return;
   }
   if (run.status === 'awaiting_review') {

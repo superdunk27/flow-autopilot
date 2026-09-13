@@ -110,6 +110,49 @@
     return null;
   }
 
+  /** True if `el` looks enabled/clickable — neither the native `disabled`
+   * property nor `aria-disabled="true"` is set. */
+  function isEnabled(el) {
+    return !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+  }
+
+  /**
+   * Waits until `el` becomes enabled (see isEnabled). Used as a
+   * *functional* readiness signal — e.g. "has this site's composer
+   * finished processing an upload" — instead of guessing at whichever
+   * decorative thumbnail/preview markup the site happens to render for
+   * that state, which is far more likely to drift across DOM changes
+   * than the button's own disabled state (the site has to keep that
+   * correct for its own UI to work at all). Throws FATimeoutError if it
+   * never becomes enabled — never silently proceeds with a disabled
+   * button.
+   */
+  async function waitForEnabled(el, { step, description, timeoutMs = 30000, pollMs = 250 } = {}) {
+    const start = Date.now();
+    while (!isEnabled(el)) {
+      if (Date.now() - start > timeoutMs) {
+        throw new FATimeoutError({ step, description, timeoutMs });
+      }
+      await sleep(pollMs);
+    }
+  }
+
+  /**
+   * Best-effort variant of waitFor: same polling behavior, but resolves
+   * to `null` instead of throwing if nothing matches within timeoutMs.
+   * Use for signals that are a nice-to-have confidence boost but should
+   * never block or fail the pipeline on their own (e.g. an optional
+   * upload-thumbnail check layered on top of a required functional
+   * check like waitForEnabled).
+   */
+  async function softWaitFor(selectorList, { timeoutMs = 5000, pollMs = 250, root: searchRoot = document } = {}) {
+    try {
+      return await waitFor(selectorList, { step: 'soft', description: 'soft', timeoutMs, pollMs, root: searchRoot });
+    } catch (_) {
+      return null;
+    }
+  }
+
   /**
    * Waits until an element that WAS present disappears (or never appears
    * at all within a short grace window), used for "stop generating"
@@ -247,6 +290,9 @@
     waitFor,
     isLastResortMatch,
     findByVisibleText,
+    isEnabled,
+    waitForEnabled,
+    softWaitFor,
     waitForDisappearance,
     waitForGenerationComplete,
     dataUrlToFile,

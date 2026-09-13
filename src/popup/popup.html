@@ -24,6 +24,11 @@
       <span id="fileLabel">เลือกรูปสินค้า…</span>
       <input type="file" id="productImage" accept="image/*" />
     </label>
+    <div class="row">
+      <input type="text" id="imageUrlInput" placeholder="หรือวาง URL รูปภาพ…" />
+      <button id="loadUrlBtn" class="secondary">โหลด</button>
+    </div>
+    <p class="urlError" id="urlError" hidden></p>
     <img id="preview" hidden alt="ตัวอย่างรูปสินค้า" />
     <button id="runBtn" disabled>Run ▶</button>
   </section>
@@ -31,6 +36,9 @@
   <section id="runningView" class="view" hidden>
     <div class="spinner"></div>
     <p id="runningLabel">กำลังทำงาน…</p>
+    <p class="hint" id="stuckHint" hidden>
+      ⏱️ นานกว่าปกติ — เว็บอาจค้างหรือ selector ไม่ตรง DOM ลองกด "ยกเลิก" แล้วเริ่มใหม่ หรือรอเพิ่มอีกนิด
+    </p>
     <button id="cancelBtn" class="secondary">ยกเลิก</button>
   </section>
 

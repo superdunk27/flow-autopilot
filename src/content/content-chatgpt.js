@@ -19,7 +19,52 @@
     }
   }
 
-  async function attachAndSend({ step, productImageDataUrl, promptText, warnings }) {
+  /**
+   * Enters ChatGPT's "Create image" mode via the composer's "+" menu.
+   * Per real-account testing (2026-09-13), the image-gen step needs this
+   * explicit step — just typing an image request as plain text on a
+   * fresh chat isn't enough to reliably trigger image generation.
+   * UNVERIFIED against live DOM (no authenticated session was reachable
+   * this round — see README "Known limitations"): plusMenuButton is a
+   * best-effort aria-label guess, but the menu item itself is found by
+   * its actual visible text ("Create image") via findByVisibleText,
+   * which is far more resilient to markup changes than guessing a
+   * data-testid/class for it would be.
+   */
+  async function enterCreateImageMode(step, warnings) {
+    const plusBtn = await FA_UTILS.waitFor(SEL.plusMenuButton, {
+      step,
+      description: 'ปุ่ม "+" เปิดเมนู attachment/tools',
+    });
+    collectWarning(warnings, plusBtn, SEL.plusMenuButton, 'ปุ่ม "+"');
+    plusBtn.click();
+    await FA_UTILS.randomDelay(400, 800);
+
+    // Poll for the "Create image" menu item by visible text rather than
+    // a single waitFor call, since the menu itself may take a moment to
+    // render after the click.
+    const start = Date.now();
+    let menuItem = null;
+    while (!menuItem && Date.now() - start < 8000) {
+      menuItem = FA_UTILS.findByVisibleText(SEL.menuItemTags, [/create image/i]);
+      if (!menuItem) await FA_UTILS.sleep(250);
+    }
+    if (!menuItem) {
+      throw new FASelectorError({
+        step,
+        description: 'เมนู "Create image" (หลังกดปุ่ม +)',
+        selectorsTried: [`${SEL.menuItemTags} matching text /create image/i`],
+      });
+    }
+    menuItem.click();
+    await FA_UTILS.randomDelay(500, 1000);
+  }
+
+  async function attachAndSend({ step, mode, productImageDataUrl, promptText, warnings }) {
+    if (mode === FA_STEPS.IMAGEGEN) {
+      await enterCreateImageMode(step, warnings);
+    }
+
     const fileInput = await FA_UTILS.waitFor(SEL.fileInput, {
       step,
       description: 'ช่องแนบไฟล์ (file input) ของ ChatGPT',
@@ -28,11 +73,14 @@
     const file = FA_UTILS.dataUrlToFile(productImageDataUrl, 'product.png');
     await FA_UTILS.attachFileToInput(fileInput, file);
 
-    await FA_UTILS.waitFor(SEL.attachmentPreview, {
-      step,
-      description: 'ภาพตัวอย่างไฟล์แนบ (ยืนยันว่าอัปโหลดสำเร็จ)',
-      timeoutMs: 30000,
-    });
+    // The exact "attachment finished uploading" indicator is unverified
+    // against live DOM (see selectors.js comment) — a real user hit a
+    // clean "selector not found" here even though the upload had
+    // genuinely succeeded. Treat it as an optional confidence signal
+    // only (never throws) and gate on the send button actually becoming
+    // enabled instead — a functional readiness signal the site has to
+    // get right for its own UI to work, not a guess at its markup.
+    await FA_UTILS.softWaitFor(SEL.attachmentPreview, { timeoutMs: 8000 });
     await FA_UTILS.randomDelay(500, 1100);
 
     const composer = await FA_UTILS.waitFor(SEL.composer, {
@@ -45,6 +93,11 @@
     const sendBtn = await FA_UTILS.waitFor(SEL.sendButton, {
       step,
       description: 'ปุ่มส่งข้อความ (send)',
+    });
+    await FA_UTILS.waitForEnabled(sendBtn, {
+      step,
+      description: 'ปุ่มส่ง (รอจนกดได้ — ยืนยันว่าอัปโหลด/พิมพ์เสร็จจริง)',
+      timeoutMs: 30000,
     });
     sendBtn.click();
 

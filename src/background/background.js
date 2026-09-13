@@ -61,7 +61,39 @@ async function sendMessageWithRetry(tabId, message, { timeoutMs = 20000, interva
   }
 }
 
+/**
+ * Races `promise` against a ceiling timeout, rejecting with a clear
+ * message if it wins. Belt-and-suspenders against a run getting stuck at
+ * status "running" forever: `chrome.tabs.sendMessage`'s returned promise
+ * only settles once the content script calls sendResponse (see
+ * content-chatgpt.js / content-flow.js's message listeners), which for
+ * this extension only happens once an entire step's work has finished or
+ * thrown — if a tab gets closed, navigated away from, or otherwise loses
+ * its content script mid-step in a way that doesn't cleanly reject that
+ * promise, background.js would otherwise await it indefinitely with no
+ * way out except the user manually clicking "ยกเลิก" without ever being
+ * told why. This ensures a step always eventually reaches a terminal
+ * status on its own.
+ */
+function withCeiling(promise, ms, description) {
+  let timer;
+  const ceiling = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`[Flow Autopilot] ${description} ไม่เสร็จภายใน ${Math.round(ms / 60000)} นาที — ยกเลิกอัตโนมัติแทนที่จะค้างไม่มีกำหนด`)),
+      ms
+    );
+  });
+  return Promise.race([promise, ceiling]).finally(() => clearTimeout(timer));
+}
+
 // ---- pipeline steps -------------------------------------------------------
+
+// Ceilings comfortably above each step's own internal timeouts (5 min
+// generation-wait for chatgpt.com steps, 10 min for Flow's video), so a
+// step that's still genuinely working never trips this — it only fires
+// if the content script's response never arrives at all.
+const CHATGPT_STEP_CEILING_MS = 8 * 60 * 1000;
+const FLOW_STEP_CEILING_MS = 12 * 60 * 1000;
 
 async function startAnalyzeStep(productImageDataUrl) {
   const opts = await getOptions();
@@ -79,15 +111,19 @@ async function startAnalyzeStep(productImageDataUrl) {
     warnings: [],
   });
   try {
-    await sendMessageWithRetry(tabId, {
-      type: FA_MSG.RUN_CHATGPT_STEP,
-      payload: {
-        mode: FA_STEPS.ANALYZE,
-        stepLabel: FA_STEPS.ANALYZE,
-        productImageDataUrl,
-        promptText: `${opts.analyzeTemplate}\n\n${FA_ANALYZE_TRAILER}`,
-      },
-    });
+    await withCeiling(
+      sendMessageWithRetry(tabId, {
+        type: FA_MSG.RUN_CHATGPT_STEP,
+        payload: {
+          mode: FA_STEPS.ANALYZE,
+          stepLabel: FA_STEPS.ANALYZE,
+          productImageDataUrl,
+          promptText: `${opts.analyzeTemplate}\n\n${FA_ANALYZE_TRAILER}`,
+        },
+      }),
+      CHATGPT_STEP_CEILING_MS,
+      'ขั้นวิเคราะห์สินค้า (ChatGPT)'
+    );
   } catch (err) {
     await fail(FA_STEPS.ANALYZE, err.message);
   }
@@ -104,15 +140,19 @@ async function startImageGenStep(storyboardPrompt) {
     error: null,
   });
   try {
-    await sendMessageWithRetry(tabId, {
-      type: FA_MSG.RUN_CHATGPT_STEP,
-      payload: {
-        mode: FA_STEPS.IMAGEGEN,
-        stepLabel: FA_STEPS.IMAGEGEN,
-        productImageDataUrl: run.productImageDataUrl,
-        promptText: storyboardPrompt,
-      },
-    });
+    await withCeiling(
+      sendMessageWithRetry(tabId, {
+        type: FA_MSG.RUN_CHATGPT_STEP,
+        payload: {
+          mode: FA_STEPS.IMAGEGEN,
+          stepLabel: FA_STEPS.IMAGEGEN,
+          productImageDataUrl: run.productImageDataUrl,
+          promptText: storyboardPrompt,
+        },
+      }),
+      CHATGPT_STEP_CEILING_MS,
+      'ขั้นสร้างภาพ storyboard (ChatGPT)'
+    );
   } catch (err) {
     await fail(FA_STEPS.IMAGEGEN, err.message);
   }
@@ -129,13 +169,17 @@ async function startFlowStep(videoPrompt) {
     error: null,
   });
   try {
-    await sendMessageWithRetry(tabId, {
-      type: FA_MSG.RUN_FLOW_STEP,
-      payload: {
-        storyboardImageDataUrl: run.storyboardImageDataUrl,
-        videoPrompt,
-      },
-    });
+    await withCeiling(
+      sendMessageWithRetry(tabId, {
+        type: FA_MSG.RUN_FLOW_STEP,
+        payload: {
+          storyboardImageDataUrl: run.storyboardImageDataUrl,
+          videoPrompt,
+        },
+      }),
+      FLOW_STEP_CEILING_MS,
+      'ขั้นสร้างวิดีโอ (Google Flow)'
+    );
   } catch (err) {
     await fail(FA_STEPS.FLOW, err.message);
   }

@@ -35,6 +35,18 @@
         'input[type="file"]',
       ],
       // Thumbnail/chip that appears once an attachment finishes uploading.
+      // NOT a hard gate as of the real-account test round (2026-09-13):
+      // none of these 3 candidates matched real chatgpt.com DOM even
+      // though the upload genuinely succeeded (visible in the live chat)
+      // — confirmed by the exact "selector not found" error a real user
+      // hit. Rather than keep guessing at decorative markup with no live
+      // DOM access to verify against, content-chatgpt.js now uses this
+      // only as an optional/soft confidence signal (FA_UTILS.softWaitFor,
+      // never throws) and gates on sendButton becoming enabled instead —
+      // a functional signal the site has to get right for its own UI to
+      // work, not a guess at its internal markup. Still worth fixing
+      // properly with real inspect-element data when available; until
+      // then it's not load-bearing.
       attachmentPreview: [
         '[data-testid="attachment-thumbnail"]',
         '[class*="attachment"] img',
@@ -52,6 +64,24 @@
         'button[aria-label="Send prompt"]',
         'button[aria-label*="Send" i]',
       ],
+      // The "+" button that opens the composer's attachment/tools menu
+      // (Add photos & files / Create image / Agent mode / etc.) — needed
+      // for the image-gen step, which per real usage must explicitly
+      // enter "Create image" mode via this menu rather than just typing
+      // a request in plain text. UNVERIFIED against live DOM (same
+      // reason as attachmentPreview above) — best-effort aria-label
+      // guesses; the menu ITEM itself is found by visible text
+      // (FA_UTILS.findByVisibleText) rather than a structural guess,
+      // since "Create image" as literal button text is far more stable
+      // across markup changes than any data-testid/class guess would be.
+      plusMenuButton: [
+        'button[data-testid="composer-plus-btn"]',
+        'button[aria-label="Add photos & files" i]',
+        'button[aria-haspopup="menu"][aria-label*="add" i]',
+      ],
+      // Searched with FA_UTILS.findByVisibleText, not matched directly —
+      // this is the set of tags that plausibly render a menu item.
+      menuItemTags: '[role="menuitem"], [role="menuitemradio"], button, div',
       // Shown while ChatGPT is still generating a response.
       stopGeneratingButton: [
         'button[data-testid="stop-button"]',

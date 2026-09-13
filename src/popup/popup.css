@@ -102,6 +102,35 @@ button.secondary {
   flex: 1;
 }
 
+#idleView .row {
+  align-items: center;
+}
+
+#imageUrlInput {
+  flex: 1;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+#loadUrlBtn {
+  flex: 0 0 auto;
+}
+
+.urlError {
+  color: #b91c1c;
+  font-size: 11px;
+  margin: 0;
+}
+
+#stuckHint {
+  color: #92400e;
+  text-align: center;
+}
+
 .spinner {
   width: 24px;
   height: 24px;
