@@ -168,15 +168,26 @@
 
   /**
    * Attaches the product image and verifies it actually took, retrying
-   * once with a fresh file-input lookup and a longer settle delay if the
-   * first attempt's attachmentPreview check fails — the retry is the
-   * direct fix for the "page wasn't interactive yet" regression above:
-   * re-querying the file input fresh (rather than reusing a possibly
-   * stale reference) and giving the page more time before trying again
-   * gives hydration a second chance to finish.
+   * up to 2 more times with a fresh file-input lookup and a longer
+   * settle delay if an attempt's attachmentPreview check fails.
+   *
+   * Timeout sizing note (2026-09-15): the original 15s/2-attempt budget
+   * was tuned against a 3KB test image used for live verification — a
+   * real product photo from a phone camera can easily be 1-10MB+, and
+   * ChatGPT's real upload + thumbnail-render pipeline for a file that
+   * size plausibly takes meaningfully longer than for a tiny test image.
+   * A recurrence of this exact error was traced (full call-graph check,
+   * not just a diff read) to be mechanically unrelated to the
+   * checkVisibility()/enterCreateImageMode changes in a397024 — neither
+   * findByVisibleText nor isReallyVisible is ever called from this
+   * function or waitForPageReady, and enterCreateImageMode only runs for
+   * the image-gen step, never analyze. So this widened budget is a
+   * real-world-sizing correction, not a fix for a specific proven defect
+   * in this function — flagged as such rather than claimed as certain.
    */
   async function attachProductImage(step, productImageDataUrl, warnings) {
-    const MAX_ATTEMPTS = 2;
+    const MAX_ATTEMPTS = 3;
+    const ATTEMPT_TIMEOUT_MS = 25000;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
         const fileInput = await FA_UTILS.waitFor(SEL.fileInput, {
@@ -203,25 +214,25 @@
         const attachmentChip = await FA_UTILS.waitFor(SEL.attachmentPreview, {
           step,
           description: 'ภาพตัวอย่างไฟล์แนบ (ยืนยันว่าอัปโหลดสำเร็จจริงก่อนพิมพ์/ส่ง)',
-          timeoutMs: 15000,
+          timeoutMs: ATTEMPT_TIMEOUT_MS,
         });
         collectWarning(warnings, attachmentChip, SEL.attachmentPreview, 'ภาพตัวอย่างไฟล์แนบ');
         return;
       } catch (err) {
         if (attempt < MAX_ATTEMPTS) {
           warnings.push(
-            `⚠️ แนบไฟล์รอบที่ ${attempt} ไม่สำเร็จ (${(err.message || '').slice(0, 100)}) — ลองใหม่อีกครั้งหลังรอหน้าเว็บโหลดเพิ่ม`
+            `⚠️ แนบไฟล์รอบที่ ${attempt} ไม่สำเร็จ (${(err.message || '').slice(0, 100)}) — ลองใหม่อีกครั้งหลังรอหน้าเว็บ/อัปโหลดเพิ่ม`
           );
-          await FA_UTILS.sleep(2500);
+          await FA_UTILS.sleep(2500 * attempt);
           continue;
         }
         throw new FASelectorError({
           step,
-          description: 'ภาพตัวอย่างไฟล์แนบ (หลังลอง 2 รอบ)',
+          description: `ภาพตัวอย่างไฟล์แนบ (หลังลอง ${MAX_ATTEMPTS} รอบ)`,
           selectorsTried: SEL.attachmentPreview,
           siteHint:
-            'อาจไม่ใช่แค่ selector ผิด — เป็นไปได้ว่าหน้าเว็บยังโหลด/hydrate ไม่เสร็จตอนแนบไฟล์ครั้งแรก ' +
-            '(ChatGPT เป็น SPA ที่ใช้เวลาพร้อมใช้งานจริงหลัง document โหลดเสร็จ) ลองรันใหม่อีกครั้ง',
+            'อาจไม่ใช่แค่ selector ผิด — เป็นไปได้ว่าหน้าเว็บยังโหลด/hydrate ไม่เสร็จ หรือไฟล์รูปมีขนาดใหญ่และ ChatGPT ' +
+            'ยังอัปโหลด/สร้าง thumbnail ไม่เสร็จตอนเช็ค ลองรันใหม่อีกครั้ง หรือลองรูปขนาดเล็กลง',
         });
       }
     }

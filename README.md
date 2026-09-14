@@ -13,6 +13,54 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v10: "regression" investigated — a397024 provably innocent
+
+Right after v9 shipped, Toey re-tested the analyze step and hit the
+*exact same* `attachmentPreview not found (after 2 attempts)` error that
+v8 had already fixed and confirmed working — understandably read as v9
+having broken v8's fix, since v9 also touched
+`isReallyVisible`/`findByVisibleText`.
+
+**Traced conclusively, not assumed**: `attachProductImage()` (the
+analyze step's file-attach path) calls `FA_UTILS.waitFor()`, which is
+pure `document.querySelector()` matching — it has never called
+`isReallyVisible`, `findByVisibleText`, or `checkVisibility()` at any
+point, before or after v9. `enterCreateImageMode()` (what v9 actually
+changed) only runs for the image-gen step and is never called during
+analyze. Confirmed by diffing v9's exact changes (`git diff 1449a5a
+a397024`) and by grepping every call site of `findByVisibleText`/
+`isReallyVisible` in the whole codebase — neither appears anywhere in
+`attachAndSend`, `attachProductImage`, or `waitForPageReady`. **v9
+mechanically cannot have caused this** — not a claim, a traced fact.
+
+So what actually happened: this is very plausibly the *same*
+page-readiness race v8 partially fixed, recurring under different
+real-world conditions than the one successful run. The concrete
+difference spotted: the live verification for v8's fix used a 3KB test
+image; a real product photo from a phone camera can easily be 1-10MB+,
+and ChatGPT's real upload + thumbnail-render pipeline for a file that
+size plausibly takes meaningfully longer than for a tiny test image —
+easily long enough to exceed the original 15-second-per-attempt budget,
+which was never validated against a realistically-sized file.
+
+**Fix**: widened `attachProductImage()`'s timing to a size this
+plausible explanation actually needs, not a proven fix for a specific
+defect — flagged as such: per-attempt timeout 15s → 25s, max attempts
+2 → 3, retry gap now scales with attempt number (2.5s, 5s). Error
+message on final failure now also names "the photo might be large and
+still uploading" as a possibility alongside page-timing, rather than
+only the timing theory.
+
+**Verified not to affect the v9 imagegen fix**: the diff for this change
+touches only `attachProductImage()` — confirmed by re-reading the diff
+before committing, not just by intent. `enterCreateImageMode()`,
+`tryOpenPlusMenu()`, and `dispatchHoverSequence()` are byte-for-byte
+unchanged. Also confirmed clean extension load (zero console errors) via
+CDP, same as every prior round. **Still not live-re-tested** — this
+round couldn't verify against a real account either; the widened budget
+is an evidence-based improvement, not a confirmed fix, same caveat as
+v8/v9.
+
 ## v9: root-caused a real image-gen bug (not just another retry)
 
 **v8 confirmed working**: Toey's next real-account run passed the
