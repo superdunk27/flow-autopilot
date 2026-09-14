@@ -43,6 +43,16 @@
     }
   }
 
+  // PARKED, not deleted (2026-09-14, see README "v14"): dispatchHoverSequence,
+  // tryOpenPlusMenu, and enterCreateImageMode below are no longer called
+  // anywhere — attachAndSend() stopped invoking enterCreateImageMode once
+  // chatgpt.com/images was confirmed to put the composer in image-gen
+  // mode without it. Kept intentionally as a real, working, DOM-confirmed
+  // fallback in case the /images route turns out not to fully replace
+  // this path once end-to-end tested live (attaching + generating on
+  // /images has not yet been live-confirmed, only the route/selectors'
+  // existence has). Remove once that's confirmed across a few real runs.
+
   /** Fires a hover-style event sequence on `el` — pointerenter,
    * mouseenter, mouseover — in addition to whatever click happens
    * separately. See enterCreateImageMode for why. */
@@ -335,9 +345,18 @@
   async function attachAndSend({ step, mode, productImageDataUrl, promptText, warnings }) {
     await waitForPageReady(step);
 
-    if (mode === FA_STEPS.IMAGEGEN) {
-      await enterCreateImageMode(step, warnings);
-    }
+    // enterCreateImageMode() (the "+" -> "Create image" click-through) is
+    // NOT called here anymore — see README "v14". Confirmed live
+    // 2026-09-14: chatgpt.com/images is a real, dedicated route whose
+    // composer is already in image-generation mode by default (no menu
+    // needed), and — critically — carries the exact same file input
+    // (input[data-testid="upload-photos-input"], id="upload-photos") and
+    // composer (#prompt-textarea) selectors already confirmed working
+    // for the analyze step, which attachProductImage() below locates
+    // directly via DataTransfer, never by clicking anything. background.js
+    // now opens this URL directly for the imagegen step (see
+    // startImageGenStep), which sidesteps the "+" button's interestfor
+    // trusted-event requirement entirely instead of working around it.
 
     await attachProductImage(step, productImageDataUrl, warnings);
     await FA_UTILS.randomDelay(500, 1100);

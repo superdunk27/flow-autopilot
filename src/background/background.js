@@ -190,7 +190,13 @@ async function startAnalyzeStep(productImageDataUrl) {
 
 async function startImageGenStep(storyboardPrompt) {
   const run = await getRun();
-  const tabId = await openTab('https://chatgpt.com/');
+  // chatgpt.com/images (not a plain new chat) — see README "v14".
+  // Confirmed live 2026-09-14: this dedicated route's composer is
+  // already in image-generation mode by default, and exposes the same
+  // file input the analyze step already attaches to directly (no "+"
+  // menu click needed), sidestepping that button's interestfor
+  // trusted-event requirement instead of working around it.
+  const tabId = await openTab('https://chatgpt.com/images');
   await setRun({
     status: FA_STATUS.RUNNING,
     currentStep: FA_STEPS.IMAGEGEN,

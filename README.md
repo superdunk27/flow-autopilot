@@ -13,6 +13,73 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v14: sidestepped the "+" menu entirely — chatgpt.com/images route
+
+Good news first: **analyze step confirmed 100% working end to end**, live,
+by Aree, on a real product photo (Deo KLEAR) with no rate limit —
+attach, type, send, parse, and the review checkpoint all correct. v11's
+keepalive/progress work, v12's send-button self-heal, and v13's SW
+keepalive are all confirmed real, not just plausible, for that step.
+
+For the imagegen step's "+" menu bug, Aree got definitive proof (not
+just a plausible theory) that this is a real browser-platform limit, not
+a fixable selector/timing bug: clicking the real "+" button with
+`xdotool` (an OS-level, hardware-trusted click via the X server — not
+JS) opened the menu instantly; the extension's `element.click()`/
+`dispatchEvent()` (synthetic, `isTrusted: false`) never does, no matter
+what's tried. ChatGPT's "+" button carries the HTML `interestfor`
+attribute (Open UI's emerging Interest Invokers spec — flagged as a
+possibility since v9), which genuinely requires a trusted input event.
+A content script cannot produce one through the DOM. Chrome's
+`chrome.debugger` (CDP) *can* dispatch trusted input, but requires the
+`debugger` permission, which puts a persistent, unmissable "being
+debugged" banner in the user's browser — invasive enough that Aree
+flagged it as likely unsuitable for something meant for general use.
+
+Before reaching for that or accepting partial automation (a human
+clicking "+" once per run), checked Aree's first suggestion: does
+`chatgpt.com` expose an image-gen entry point that doesn't go through
+this menu at all? **Yes — with live DOM access this round (same VNC
+session Aree had just used, read-only inspection, no real
+attach/send/generation triggered to avoid spending real account usage
+without a specific go-ahead for that)**:
+
+- `chatgpt.com/images` is a real, dedicated route. Its composer's
+  placeholder is literally "Describe a new image" — it's in image-gen
+  mode *by default*, no menu needed.
+- Its own "+" button **also** carries `interestfor` (confirmed via a
+  live `getAttribute()` check) — so this route doesn't bypass the
+  trusted-click issue for opening *that* menu either. It doesn't need
+  to: a direct DOM query on that page found `input[data-testid=
+  "upload-photos-input"]` (`id="upload-photos"`) already present and
+  visible, the *exact same* file input `fileInput`'s already-confirmed
+  first-candidate selector matches — the same element `attachProductImage()`
+  already locates and fills via `DataTransfer` (never a click) for the
+  analyze step. `#prompt-textarea` (the composer) is confirmed present
+  too.
+
+So the fix doesn't work around the trusted-event requirement — it
+avoids ever needing the gated button at all: `startImageGenStep()` now
+opens `chatgpt.com/images` directly (a plain URL navigation, not a DOM
+interaction, so no trusted-event issue there either) instead of a fresh
+chat, and `attachAndSend()` no longer calls `enterCreateImageMode()`
+for the imagegen step — it goes straight to `attachProductImage()` +
+type + send, exactly like the now-confirmed-working analyze step.
+`enterCreateImageMode()`/`tryOpenPlusMenu()`/`dispatchHoverSequence()`
+are left in the file (marked PARKED, not deleted) as a real, working
+fallback in case this doesn't fully hold up end to end.
+
+**Honest limits of this round's verification**: confirmed via live DOM
+— the route exists, is in image-gen mode by default, and its file
+input/composer selectors are identical to already-working ones.
+**Not confirmed**: actually attaching a photo and sending a prompt on
+this page and getting a real generated image back — that step was
+deliberately not performed this round to avoid spending real ChatGPT
+usage/generation quota on Toey's account without an explicit go-ahead
+for that specific action. This is strong DOM evidence for a promising
+fix, not a DOM-verified end-to-end pass — flagged as an open question
+for the next live imagegen test, same as v9's now-confirmed fix once was.
+
 ## v13: possible unifying root cause — MV3 service-worker idle-termination, no keepalive
 
 Aree checked `chrome://extensions` directly during a stuck run (analyze
