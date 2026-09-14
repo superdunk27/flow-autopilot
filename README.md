@@ -13,6 +13,39 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v39: v9 template — reframe the crop instruction as positive framing, not a prohibition
+
+v8's "CRITICAL — per-scene crop" paragraph was phrased as a
+prohibition — telling the model what NOT to show (the full grid). v9
+replaces it with positive framing instead: describing each scene as if
+it were handed only that one panel's photo, already cropped/enlarged/
+centered, with the grid/borders/gutters/badges simply absent from what
+the model is asked to imagine, rather than telling it what to avoid
+showing.
+
+Single-paragraph replacement in Section 3 — v7's text-lock CRITICAL
+paragraph kept exactly as-is per explicit instruction (it's already
+working correctly). Copied verbatim from `ψ/active/flow-autopilot-extension.md`
+"Update 2026-09-14 v9", verified with 3 independent checks against the
+spec's exact old/new paragraph pair, as requested:
+1. **Verbatim match** — new paragraph present in the file, old one
+   absent.
+2. **Splice-reconstruction** — old template with the old paragraph
+   spliced out and the new one spliced in at the same index equals the
+   actual new template byte-for-byte.
+3. **Length arithmetic** — the template's overall length delta (+120
+   chars) equals the old/new paragraph pair's own length delta
+   exactly.
+
+Every other sentence — Sections 1, 2, and the rest of Section 3
+including v7's paragraph — confirmed byte-identical to v8. All 3
+section headings unchanged — no parse-code impact.
+
+**Not live-tested this round**: `node --check` confirms the file
+parses; the real test is the next live video generation checking
+whether this positive-framing phrasing holds up better than v8's
+prohibition-style wording did.
+
 ## v38: v8 template — force per-scene crop, stop showing the raw grid as a scene
 
 Toey found live-generated videos were showing the raw uncropped
