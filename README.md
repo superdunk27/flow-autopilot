@@ -13,6 +13,41 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v21: v4 template — badges/gradient text/doodles + 2-column grid layout
+
+Toey compared v3's actual output (once imagegen finally worked live —
+see v20) against the original reference clip (ครูแบงค์'s) and found 2
+real gaps: (1) v3's "clean minimal sans-serif text overlay" instruction
+produced flat plain-black captions with no number badges, no gradient
+text, no sparkle/heart/leaf doodles — the reference has bold gradient
+Thai lettering, circled gradient number badges, floating doodles, and
+an emphasized final-panel CTA; (2) v3's "horizontal 5-panel contact
+sheet" laid out as one long row — the reference uses a 2-column grid
+(2/2/1 for 5 panels).
+
+`FA_ANALYZE_TEMPLATE` in `messages.js` replaced with the v4 spec text
+from `ψ/active/flow-autopilot-extension.md` "Update 2026-09-14 v4" —
+copied verbatim, not paraphrased, per the spec's explicit instruction
+(same discipline as v2/v3). Verified **byte-for-byte**, not just
+visually, via a Python diff against the spec's fenced code block
+(`in_file == spec` → `True`, 3572/3572 chars) — same verification
+method used for v2/v3.
+
+Only sections 2 (Storyboard Image Prompt: 2/2/1 grid layout, gradient
+number badges, bold gradient Thai lettering, sparkle/heart/leaf
+doodles, an emphasized final-panel CTA) and 3 (Video Prompt: text
+animation float/breathe/fade + drifting doodles, matching section 2's
+new style) changed. Section 1 (Storyboard Plan) is confirmed
+byte-identical to v3 (diffed programmatically against the v3 commit,
+not eyeballed). All 3 section headings are unchanged from v3 —
+`parseAnalysisResponse()` in `content-chatgpt.js` needed no changes,
+confirmed by re-reading its regex patterns against the new headings.
+
+Not live-tested this round (a template/prompt-content change, not
+selector/timing code — `node --check` confirms the file parses, but
+the real test is whether the next live imagegen run actually produces
+badges/gradient text/doodles/grid layout matching the reference).
+
 ## v20: real progress — analyze + imagegen both work end to end; fixed generatedImage DOM drift
 
 🎉 Big milestone: v11–v19's fixes (recovery, CSS, runId, keepalive, retry)
