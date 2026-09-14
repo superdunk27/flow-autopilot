@@ -217,6 +217,25 @@
       uploadButton: [
         '.sidebar-upload-btn',
       ],
+      // The REAL root cause of the "generated an image instead of a
+      // video" bug (2026-09-15, see README "v30") — confirmed live by
+      // Toey: the "Agent" chatbox has a real, separate generation-type
+      // selector for the *next message specifically* — distinct from
+      // the "Agent settings" defaults panel (Image/Video generation
+      // *default* model prefs) found earlier the same day, which is a
+      // different panel entirely. Opened via this exact button
+      // (CONFIRMED live: `button.settings-trigger-button`,
+      // aria-label="Settings trigger"), it reveals a panel with
+      // Image/Video toggles, aspect ratio, model, resolution, duration,
+      // and count controls for the message about to be sent. Setting
+      // this to "Video" explicitly before typing/generating is what
+      // actually routes to Omni 1.1 Flash (video) instead of Nano
+      // Banana (image) — the directive-prefix wording fix from v29 was
+      // not the real fix; kept only as a harmless extra safety net.
+      settingsTriggerButton: [
+        'button.settings-trigger-button',
+        'button[aria-label="Settings trigger" i]',
+      ],
       // Real gap found live 2026-09-15 (see README "v25"): missing
       // entirely, not wrong. Attaching the file via fileInput above only
       // puts it in an asset picker — it still has to be explicitly

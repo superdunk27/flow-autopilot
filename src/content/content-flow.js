@@ -378,7 +378,76 @@
   // which is directly what went wrong this time).
   const VIDEO_MODE_DIRECTIVE = 'Generate a video (not an image edit):\n\n';
 
+  const VIDEO_TOGGLE_TEXT_PATTERNS = [/^video$/i];
+
+  /**
+   * The REAL fix for the "generated an image instead of a video" bug
+   * (2026-09-15, see README "v30") — the directive-prefix wording
+   * above (v29) was NOT the actual cause. Confirmed live by Toey: the
+   * "Agent" chatbox has a real, separate generation-type selector for
+   * the *next message specifically* — distinct from the "Agent
+   * settings" defaults panel found earlier the same day (Image/Video
+   * generation *default model* preferences, a different panel
+   * entirely). Opening it via `button.settings-trigger-button` and
+   * explicitly clicking "Video" before typing/generating is what
+   * actually routes to Omni 1.1 Flash instead of Nano Banana — verified
+   * with a real, complete, correctly-ordered 10s/5-scene video.
+   */
+  async function setVideoGenerationMode(warnings) {
+    const settingsBtn = await FA_UTILS.waitFor(SEL.settingsTriggerButton, {
+      step: STEP,
+      description: 'ปุ่มเปิด settings panel (เลือก generation type: Video/Image ก่อนพิมพ์ prompt)',
+    });
+    collectWarning(warnings, settingsBtn, SEL.settingsTriggerButton, 'ปุ่ม settings trigger');
+    settingsBtn.click();
+    await FA_UTILS.randomDelay(400, 800);
+
+    // The "Video"/"Image" toggle buttons share the exact same class
+    // (mat-button-toggle-button) — not unique on their own, confirmed
+    // live by Toey — so this scans every match and filters by the
+    // inner span.toggle-text's actual visible text, same
+    // "shared class, distinguish by text" pattern as
+    // FA_UTILS.findByVisibleText() elsewhere in this codebase.
+    function findVideoToggle() {
+      const candidates = Array.from(document.querySelectorAll('button.mat-button-toggle-button'));
+      for (const btn of candidates) {
+        const span = btn.querySelector('span.toggle-text');
+        const text = (span?.textContent || '').trim();
+        if (VIDEO_TOGGLE_TEXT_PATTERNS.some((re) => re.test(text))) return btn;
+      }
+      return null;
+    }
+
+    let videoToggle = null;
+    const start = Date.now();
+    while (!videoToggle && Date.now() - start < 8000) {
+      videoToggle = findVideoToggle();
+      if (!videoToggle) await FA_UTILS.sleep(250);
+    }
+    if (!videoToggle) {
+      throw new FASelectorError({
+        step: STEP,
+        description: 'ปุ่ม toggle "Video" ใน settings panel (ตั้ง generation type ก่อนพิมพ์ prompt)',
+        selectorsTried: ['button.mat-button-toggle-button (filtered by span.toggle-text === "Video")'],
+        siteHint: 'ถ้า panel เปลี่ยน DOM อีก ตรวจผ่าน DevTools แล้วปรับ findVideoToggle() ใน content-flow.js',
+      });
+    }
+    videoToggle.click();
+    await FA_UTILS.randomDelay(400, 800);
+
+    // Close the panel before continuing — exact dismiss mechanism not
+    // confirmed live (flagged explicitly, not assumed): using the
+    // safest generic approach instead of guessing a specific close
+    // button — a plain click outside the panel is the standard
+    // Angular Material CDK overlay dismiss behavior (clicking anywhere
+    // outside the overlay's own DOM closes it via its backdrop-click
+    // listener), and document.body is always outside the overlay.
+    document.body.click();
+    await FA_UTILS.randomDelay(300, 600);
+  }
+
   async function submitVideoPrompt(videoPrompt, warnings, evidenceImgs = []) {
+    await setVideoGenerationMode(warnings);
     const promptField = await findPromptField(STEP, evidenceImgs);
     collectWarning(warnings, promptField, SEL.promptField, 'ช่องกรอก prompt');
     const fullPrompt = VIDEO_MODE_DIRECTIVE + videoPrompt;

@@ -13,6 +13,59 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v30: 🎉🎉🎉 the real fix — an explicit per-message generation-type selector
+
+Toey found the actual root cause by hand: v29's directive-prefix
+wording theory was wrong. The real fix is a genuine, separate
+per-message generation-type selector — opened via
+`button.settings-trigger-button` (aria-label "Settings trigger", the
+slider icon next to the send arrow), distinct from the "Agent
+settings" *defaults* panel found earlier the same day. Setting it to
+"Video · 720p · 10s · x1" explicitly before typing the prompt and
+generating routed cleanly to Omni 1.1 Flash (video) — confirmed with a
+real, complete, correctly-ordered 10-second/5-scene video, played back
+and checked scene-by-scene.
+
+A side-investigation into an "Agent" chip (`button.agent-mode-chip`)
+briefly looked like a required prerequisite click, with confusing
+results (a real trusted click triggered an unrelated "Thinking..."
+hang with no new asset created — no quota spent; a synthetic JS click
+did nothing to its own checked class but somehow made a previously-set
+badge reappear). Resolved by re-checking the actual sequence used in
+the run that produced the real video: **the "Agent" chip was never
+clicked at all** in that run — Toey had set the generation type once
+beforehand and handed off from there. Confirmed as not a real
+prerequisite, just a confusing tangent — the direct
+`.settings-trigger-button` → "Video" toggle → generate sequence is the
+complete, correct flow on its own.
+
+**Fixed**: new `setVideoGenerationMode()` in `content-flow.js`, called
+at the very start of `submitVideoPrompt()`, before locating the prompt
+field or typing anything:
+1. Opens the settings panel via `SEL.settingsTriggerButton`
+   (`button.settings-trigger-button`).
+2. Finds the "Video" toggle — its class (`mat-button-toggle-button`)
+   is shared with the "Image" toggle, confirmed live by Toey, so this
+   scans every match and filters by the inner `span.toggle-text`'s
+   actual visible text (`=== "Video"`), the same "shared class,
+   distinguish by text" pattern `FA_UTILS.findByVisibleText()` already
+   uses elsewhere in this codebase — and clicks it.
+3. Closes the panel with a plain `document.body.click()` — the
+   standard Angular Material CDK overlay dismiss behavior (clicking
+   outside the overlay closes it via its backdrop listener). The exact
+   dismiss mechanism wasn't independently confirmed live; flagged as
+   the safest generic choice rather than a guessed specific close
+   button.
+
+v29's directive-prefix (`"Generate a video (not an image edit):\n\n"`)
+is **kept**, per explicit agreement — harmless, and a reasonable extra
+safety net even though it wasn't the actual cause.
+
+**Not live-tested this exact code yet**: the underlying sequence (open
+settings → click Video → generate) is real-world-confirmed by Toey's
+manual run; this specific automated implementation of that sequence
+has not itself been run through the extension end to end yet.
+
 ## v29: architecture-level bug — Agent has no Image/Video mode toggle, it infers intent
 
 🔴 Live-tested v28: every automated step worked exactly right — upload,
