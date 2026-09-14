@@ -394,6 +394,31 @@
    * with a real, complete, correctly-ordered 10s/5-scene video.
    */
   async function setVideoGenerationMode(warnings) {
+    // Real gap found by QA reviewing 853eb24 (2026-09-15, see README
+    // "v32"): the toggle search below queried the WHOLE document for
+    // button.mat-button-toggle-button, not scoped to the panel this
+    // click is about to open — a real risk given the separate "Agent
+    // settings" panel (found earlier the same day) also has Image/
+    // Video toggles, and if any of its elements linger in the DOM even
+    // hidden (the same class of bug already found once this session
+    // for the asset picker's own leftover thumbnail — see v28), this
+    // could match the wrong panel's toggle entirely. Made WORSE by
+    // 853eb24's check-then-set logic on top of it: a stale wrong-panel
+    // toggle that happens to read as "checked" would be silently
+    // TRUSTED and skipped rather than clicked — worse than the plain
+    // unconditional click it replaced.
+    //
+    // Fixed with the same real-evidence technique already used (and
+    // QA-approved) for findPromptField() (see v27): snapshot which
+    // toggle buttons exist BEFORE clicking settingsBtn, then prefer
+    // ones that are NEW after — structurally tied to this specific
+    // click, not a document-wide guess. Falls back to the old
+    // document-wide search (with a warning) only if the panel turns
+    // out to reuse existing hidden DOM nodes rather than creating fresh
+    // ones on open — not confirmed either way, so both paths are kept
+    // rather than assuming one.
+    const togglesBeforeOpen = new Set(document.querySelectorAll('button.mat-button-toggle-button'));
+
     const settingsBtn = await FA_UTILS.waitFor(SEL.settingsTriggerButton, {
       step: STEP,
       description: 'ปุ่มเปิด settings panel (เลือก generation type: Video/Image ก่อนพิมพ์ prompt)',
@@ -404,16 +429,29 @@
 
     // The "Video"/"Image" toggle buttons share the exact same class
     // (mat-button-toggle-button) — not unique on their own, confirmed
-    // live by Toey — so this scans every match and filters by the
+    // live by Toey — so this scans candidates and filters by the
     // inner span.toggle-text's actual visible text, same
     // "shared class, distinguish by text" pattern as
     // FA_UTILS.findByVisibleText() elsewhere in this codebase.
     function findVideoToggle() {
-      const candidates = Array.from(document.querySelectorAll('button.mat-button-toggle-button'));
-      for (const btn of candidates) {
+      const all = Array.from(document.querySelectorAll('button.mat-button-toggle-button'));
+      const fresh = all.filter((btn) => !togglesBeforeOpen.has(btn));
+      // Prefer toggles that are new since opening the panel (real
+      // evidence they belong to it); fall back to a document-wide
+      // search only if the panel turns out to reuse existing hidden
+      // DOM nodes rather than creating fresh ones (not confirmed
+      // either way — this keeps both paths instead of assuming one).
+      const usingFallback = fresh.length === 0;
+      const pool = usingFallback ? all : fresh;
+      for (const btn of pool) {
         const span = btn.querySelector('span.toggle-text');
         const text = (span?.textContent || '').trim();
-        if (VIDEO_TOGGLE_TEXT_PATTERNS.some((re) => re.test(text))) return btn;
+        if (VIDEO_TOGGLE_TEXT_PATTERNS.some((re) => re.test(text))) {
+          if (usingFallback) {
+            warnings.push('⚠️ ปุ่ม toggle "Video": ไม่เจอ toggle ใหม่ที่เพิ่งเปิดจาก settings panel — fallback ไปหาทั้งหน้าเว็บแทน (เสี่ยงจับ panel ผิดถ้ามีมากกว่าหนึ่ง โปรดตรวจผลลัพธ์)');
+          }
+          return btn;
+        }
       }
       return null;
     }

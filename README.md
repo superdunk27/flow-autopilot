@@ -13,6 +13,37 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v32: scoped the Video-toggle search to the panel that just opened, not the whole document
+
+QA reviewed 21c85d5+853eb24 before Toey's final live generate and
+found a real gap that got *worse*, not just redundant, when combined
+with v31's check-then-set: `findVideoToggle()` queried
+`button.mat-button-toggle-button` document-wide, not scoped to the
+panel `settingsBtn.click()` just opened. A separate "Agent settings"
+panel (found earlier the same day) also has Image/Video toggles — if
+any of its elements linger in the DOM even hidden (the exact same
+class of bug already found once this session, for the asset picker's
+own leftover thumbnail — see v28), this could match the wrong panel's
+toggle entirely. With v31's check-then-set layered on top, a stale
+wrong-panel toggle that happens to read as "checked" would be silently
+**trusted and skipped** rather than clicked — worse than the plain
+unconditional click it replaced.
+
+**Fixed** with the same real-evidence technique already used (and
+QA-approved) for `findPromptField()` (see v27): snapshot which toggle
+buttons exist *before* clicking `settingsBtn`, then prefer whichever
+matching toggle is new *after* — structurally tied to this specific
+click, not a document-wide guess. Falls back to the old document-wide
+search only if the panel turns out to reuse existing hidden DOM nodes
+rather than creating fresh ones on open (not confirmed either way, so
+both paths are kept rather than assuming one) — with a warning pushed
+in that fallback case, so it's visible rather than silent if it
+happens.
+
+**Not live-tested this round**: verified via `node --check` only, by
+explicit agreement — Toey held off the final generate until this
+landed.
+
 ## v31: check-then-set for the Video toggle — skip the click if already set
 
 Toey's suggestion: if this setting turns out to persist across
