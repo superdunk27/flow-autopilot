@@ -13,6 +13,61 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v18: closed the loop on sendStepDone's own fallback — it was silently invisible too
+
+Toey's direct question, precisely on target: does `sendStepDone()`
+(content script → background) actually retry, or is it a bare
+`sendMessage` with no retry — i.e. is *this* where the real extracted
+answer gets silently dropped, separate from the keepalive-port bug?
+
+**Direct answer, from the actual code**: it does retry — 4 attempts,
+backing off 1s/2s/3s (added v16, unchanged since) — that part was never
+the gap Toey suspected. But tracing what happens *after* all 4 attempts
+fail found the real remaining problem: `sendStepDone()` falls back to
+writing the complete real result directly to `chrome.storage.local`
+(key `faLostStepDone`) — and then nothing else happens. No error is
+thrown (by design, so a failed *progress-adjacent* message never crashes
+the pipeline), no `reportProgress()` follow-up (that goes through the
+same failing channel anyway), nothing updates `run.status` or
+`run.progressLabel`. From the popup's perspective, "retried 4 times,
+gave up, saved the real result somewhere nobody reads" is **completely
+indistinguishable** from "still silently stuck" — the progress label
+just stays frozen forever either way. This is exactly why v16/v17's
+retry logic being in place made zero visible difference in Aree's
+tests: those fixes closed the *data-loss* gap, not the *frozen-popup*
+symptom actually being tested against — two different problems that
+looked like one from the outside.
+
+**Fixed**: `background.js` now checks for a pending `faLostStepDone`
+entry at the very start of `handleMessage()` — on *every* incoming
+message, not just a specific one, so recovery can happen as early as
+whatever next wakes the service worker (most likely the popup reopening
+and calling `GET_STATE`, but not relying on that specific trigger). If
+found, and only if it still matches the currently-active run (same
+`status: 'running'` + `currentStep` — a stale result from an abandoned/
+cancelled run must never silently overwrite a newer one), it's
+processed exactly as if `STEP_DONE` had just arrived fresh, via the
+same `handleStepDone()` path, then the fallback key is cleared.
+
+**Practical implication for the next test**: if progress ever looks
+frozen again, simply **closing and reopening the popup** now forces a
+fresh `GET_STATE` call, which will trigger recovery immediately if a
+real result is sitting in the fallback — a concrete, fast way to tell
+"the result really is stuck/lost" from "it's sitting recovered, just
+needed something to wake the service worker and check."
+
+**What this does *not* resolve**: if the service worker is failing to
+wake on literally *any* incoming message at all (the deeper mystery
+flagged as unresolved since v15) — not just this specific STEP_DONE
+path — then recovery itself also can't fire, since it depends on
+`handleMessage()` running in the first place. If reopening the popup a
+few times still shows nothing, that would be much stronger evidence
+pointing at that deeper mystery specifically, rather than this fallback
+gap (now closed) or the keepalive port (v17, also just fixed, not yet
+live-confirmed to actually work).
+
+**Not live-tested this round**: verified via `node --check` only.
+
 ## v17: the v16 keepalive port never actually connected — fixed the connect race
 
 Aree tested v16 live (fresh run, extension reloaded first — ruled out

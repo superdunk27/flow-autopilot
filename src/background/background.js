@@ -351,7 +351,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true; // keep the channel open for the async response
 });
 
+/**
+ * Real gap found live 2026-09-15 (see README "v18"), asked about
+ * directly by Toey: content-chatgpt.js's sendStepDone() (v16) DOES
+ * retry delivery up to 4x, and DOES fall back to writing the real
+ * result to chrome.storage.local (key faLostStepDone) if every attempt
+ * fails — but nothing ever read that key back. From the popup's
+ * perspective those two outcomes ("still silently stuck" vs. "retried,
+ * failed, saved a real completed result nobody will ever see") were
+ * indistinguishable — the progress label just stays frozen forever
+ * either way, since nothing updates run state or shows an error after
+ * the fallback write. This is the reason the symptom looked completely
+ * unchanged even with v16/v17's retry logic in place: the retry+fallback
+ * only fixed *data loss*, not *the visible frozen-popup symptom* Toey
+ * and Aree were actually testing against.
+ *
+ * Checked on every incoming message (cheap: one storage read) rather
+ * than only on GET_STATE, so recovery can happen as early as whatever
+ * next wakes the service worker — most likely the popup reopening and
+ * calling GET_STATE, but not relying on that being the specific trigger.
+ * Only applied if it still matches the currently active run (same
+ * status: 'running' + currentStep) — a lost result from an abandoned/
+ * cancelled run must never silently overwrite a newer one.
+ */
+async function recoverLostStepDone() {
+  const { [FA_STORAGE_KEYS.LOST_STEP_DONE]: lost } = await chrome.storage.local.get(FA_STORAGE_KEYS.LOST_STEP_DONE);
+  if (!lost) return;
+  await chrome.storage.local.remove(FA_STORAGE_KEYS.LOST_STEP_DONE);
+  const run = await getRun();
+  if (!run || run.status !== FA_STATUS.RUNNING || run.currentStep !== lost.step) {
+    console.log('[Flow Autopilot] discarding a recovered STEP_DONE that no longer matches the active run (stale)', lost);
+    return;
+  }
+  console.log(
+    '[Flow Autopilot] recovering a STEP_DONE that failed to deliver live',
+    Math.round((Date.now() - lost.lostAt) / 1000),
+    's ago:',
+    lost
+  );
+  await handleStepDone(lost);
+}
+
 async function handleMessage(message, sender) {
+  await recoverLostStepDone();
   switch (message.type) {
     case FA_MSG.GET_STATE: {
       return { run: await getRun(), options: await getOptions() };
