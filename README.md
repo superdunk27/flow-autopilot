@@ -13,6 +13,49 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v27: QA caught a tautological check — real DOM-evidence-based fix instead
+
+QA's final review of b0ba5c4 found the "verify-after-type" check from
+v26 was a **tautology**: `typeIntoComposer(promptField, ...)` writes
+into the exact element `findPromptField()` just returned, then the
+verify step reads back from that *same* reference — so it passes
+unconditionally regardless of whether the right element was ever
+selected in the first place. All the actual protection was still
+riding on `findPromptField()`'s own size/label heuristic alone, with
+no real second layer — and QA found a concrete way that heuristic
+could still be fooled: a decoy element with no aria-label/placeholder
+(so nothing to exclude it by) happening to render *larger* than the
+real prompt field at the exact moment of the query — plausible right
+as the asset picker's closing CSS transition settles.
+
+QA's proposed fix: tie field selection to real evidence of the action
+just taken (the image landing in the prompt), not an heuristic
+disconnected from actual page state. Implemented via
+`snapshotImages()`/`newImagesSince()` in `uploadStoryboardImage()`:
+captures every `<img>` on the page *before* touching the file input,
+then again right after "Add to prompt" settles, and returns whichever
+`<img>` elements are genuinely new — real, structurally-grounded
+evidence that this image really did land somewhere, without needing to
+guess its class/selector at all. `findPromptField()` now takes these
+as `evidenceImgs` and, when available, scores every visible candidate
+by `commonAncestorDistance()` — literal DOM-tree steps to their
+nearest shared ancestor with the evidence — picking whichever is
+*structurally closest* to where the image actually landed, instead of
+size/label alone. The old size heuristic is kept only as a fallback for
+when no new `<img>` is detected at all (with a warning pushed in that
+case, since it's meaningfully weaker).
+
+The tautological verify-after-type check is kept but re-scoped
+honestly in its own comment: it still catches typing silently failing
+to register (a real, different failure mode — e.g. `execCommand`
+blocked) — it explicitly no longer claims to verify element selection,
+since that's `findPromptField()`'s job now, backed by real evidence
+instead of a guess.
+
+**Not live-tested this round**: verified via `node --check` only, by
+explicit agreement — no live DOM access, and no quota spent, until
+QA's review is satisfied.
+
 ## v26: QA's pre-live-test review — same wrong-field quota risk, one step later in the same fix
 
 QA reviewed ef7db33 in detail before Aree would spend real quota

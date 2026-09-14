@@ -93,7 +93,35 @@
   // selectors.js). Feeding a file through that input via DataTransfer
   // was NOT confirmed to complete an upload this round (live interaction
   // became unreliable right as this was being tested) — see README "v6".
+  /**
+   * Real bug found by QA reviewing b0ba5c4 (2026-09-15, see README
+   * "v27"): the previous "verify-after-type" check read the typed
+   * text back from the SAME element findPromptField() had just chosen
+   * — a tautology that always passes regardless of whether the right
+   * element was picked, providing zero actual protection against the
+   * exact wrong-field risk it was meant to close. QA's fix: tie field
+   * selection to real DOM evidence of the action we just took (adding
+   * the storyboard image to the prompt), not an unrelated size/label
+   * heuristic that a decoy element could satisfy by coincidence (e.g.
+   * mid-transition right after the asset picker closes).
+   *
+   * uploadStoryboardImage() below snapshots every <img> element that
+   * exists *before* touching the file input, then again right after
+   * "Add to prompt" settles, and returns whichever <img> elements are
+   * genuinely new — these are strong, structurally-grounded evidence
+   * that this specific image really did land somewhere, without
+   * needing to know or guess its actual class/selector.
+   */
+  function snapshotImages() {
+    return new Set(document.querySelectorAll('img'));
+  }
+
+  function newImagesSince(before) {
+    return Array.from(document.querySelectorAll('img')).filter((img) => !before.has(img));
+  }
+
   async function uploadStoryboardImage(storyboardImageDataUrl, warnings) {
+    const imagesBeforeUpload = snapshotImages();
     const dropzoneBtn = await FA_UTILS.waitFor(SEL.uploadDropzone, {
       step: STEP,
       description: 'ปุ่มเปิดแผงแนบไฟล์ ("Add ingredients to the prompt box")',
@@ -192,6 +220,16 @@
     if (FA_UTILS.isReallyVisible(addToPromptBtn)) {
       warnings.push('⚠️ ปุ่ม "Add to prompt": คลิกแล้วแต่ปุ่มยังแสดงอยู่ (ไม่ปิด asset picker) — ไม่ยืนยันได้ว่าคลิกมีผลจริง โปรดตรวจผลลัพธ์');
     }
+
+    // See the doc comment above snapshotImages()/newImagesSince() — this
+    // is the real evidence findPromptField() uses to pick the right
+    // field, instead of a size/label guess disconnected from what we
+    // actually just did to the page.
+    const newImgs = newImagesSince(imagesBeforeUpload);
+    if (!newImgs.length) {
+      warnings.push('⚠️ ไม่เจอรูปใหม่ใน DOM หลังกด "Add to prompt" — findPromptField() จะ fallback ไปใช้ heuristic ขนาด/label แทน (แม่นยำน้อยกว่า) โปรดตรวจผลลัพธ์');
+    }
+    return newImgs;
   }
 
   // Real gap found by QA reviewing ef7db33 (2026-09-15, see README
@@ -208,7 +246,48 @@
   // now checked for the text too.
   const PROMPT_FIELD_EXCLUDE_HINTS = [/search/i, /editable text/i];
 
-  async function findPromptField(step, { timeoutMs = 20000, pollMs = 250 } = {}) {
+  /**
+   * Combined DOM-tree distance between `a` and `b` (steps up from `a`
+   * to their nearest common ancestor, plus steps up from `b`) —
+   * `Infinity` if somehow not both attached to the same document. Used
+   * to score prompt-field candidates by real structural closeness to
+   * confirmed evidence, instead of an unrelated size/label guess.
+   */
+  function commonAncestorDistance(a, b) {
+    const depthsOfA = new Map();
+    let node = a;
+    let depth = 0;
+    while (node) {
+      depthsOfA.set(node, depth);
+      node = node.parentElement;
+      depth++;
+    }
+    node = b;
+    depth = 0;
+    while (node) {
+      if (depthsOfA.has(node)) return depth + depthsOfA.get(node);
+      node = node.parentElement;
+      depth++;
+    }
+    return Infinity;
+  }
+
+  /**
+   * QA found (2026-09-15, see README "v27") that the previous version
+   * of this — scoring candidates purely by rendered size — could be
+   * fooled by a decoy element that happens to render large at the
+   * moment of the query (e.g. mid-transition right as the asset picker
+   * closes) and has no aria-label/placeholder to exclude it by. Now
+   * takes `evidenceImgs` — real `<img>` elements confirmed to have
+   * newly appeared as a direct result of clicking "Add to prompt" (see
+   * uploadStoryboardImage()'s snapshotImages()/newImagesSince()) — and,
+   * when available, picks whichever visible candidate is structurally
+   * *closest* in the DOM tree to that real evidence, rather than
+   * guessing from size/label alone. Falls back to the old size
+   * heuristic only when no such evidence exists (e.g. the "Add to
+   * prompt" click didn't produce a detectably new `<img>` at all).
+   */
+  async function findPromptField(step, evidenceImgs = [], { timeoutMs = 20000, pollMs = 250 } = {}) {
     // The first 3 candidates in SEL.promptField require an
     // aria-label/placeholder actually containing "prompt" — a strong,
     // specific signal, safe to trust via a plain querySelector if one
@@ -223,11 +302,6 @@
         } catch (_) { /* ignore invalid selector */ }
         if (el) return el;
       }
-      // No specific match — score every visible contenteditable/textarea
-      // instead of trusting "first in DOM order": exclude known
-      // non-prompt hints, then prefer the largest rendered one, since
-      // the main composer is expected to visually dominate the page far
-      // more than a small utility input like a search box.
       const candidates = Array.from(document.querySelectorAll('textarea, div[contenteditable="true"]'))
         .filter((el) => FA_UTILS.isReallyVisible(el))
         .filter((el) => {
@@ -235,11 +309,25 @@
           return !PROMPT_FIELD_EXCLUDE_HINTS.some((re) => re.test(label));
         });
       if (candidates.length) {
-        candidates.sort((a, b) => {
-          const ra = a.getBoundingClientRect();
-          const rb = b.getBoundingClientRect();
-          return rb.width * rb.height - ra.width * ra.height;
-        });
+        if (evidenceImgs.length) {
+          candidates.sort((a, b) => {
+            const da = Math.min(...evidenceImgs.map((img) => commonAncestorDistance(a, img)));
+            const db = Math.min(...evidenceImgs.map((img) => commonAncestorDistance(b, img)));
+            return da - db;
+          });
+        } else {
+          // No real evidence to anchor on — fall back to preferring the
+          // largest rendered candidate, since the main composer is
+          // expected to visually dominate the page far more than a
+          // small utility input like a search box. Weaker than the
+          // evidence-based path above; a warning is pushed by the
+          // caller in this case (see uploadStoryboardImage()).
+          candidates.sort((a, b) => {
+            const ra = a.getBoundingClientRect();
+            const rb = b.getBoundingClientRect();
+            return rb.width * rb.height - ra.width * ra.height;
+          });
+        }
         return candidates[0];
       }
       if (Date.now() - start > timeoutMs) {
@@ -254,25 +342,28 @@
     }
   }
 
-  async function submitVideoPrompt(videoPrompt, warnings) {
-    const promptField = await findPromptField(STEP);
+  async function submitVideoPrompt(videoPrompt, warnings, evidenceImgs = []) {
+    const promptField = await findPromptField(STEP, evidenceImgs);
     collectWarning(warnings, promptField, SEL.promptField, 'ช่องกรอก prompt');
     FA_UTILS.typeIntoComposer(promptField, videoPrompt);
     await FA_UTILS.randomDelay(500, 1100);
 
-    // Verify the text actually landed in THIS field before ever
-    // touching Generate — closes the same risk QA flagged, checked
-    // rather than assumed: if findPromptField()'s heuristic picked the
-    // wrong element, this catches it here instead of at the cost of a
-    // real quota unit.
+    // NOTE (2026-09-15, see README "v27"): this only catches typing
+    // silently failing to register (e.g. execCommand blocked) — it
+    // does NOT verify the *element itself* was the right one, since
+    // reading back from the same reference we just wrote to is a
+    // tautology (QA's catch on the previous version of this check).
+    // Picking the right element is findPromptField()'s job now, via
+    // real DOM evidence above — this is a narrower, honestly-scoped
+    // safety net for a different failure mode, not a replacement for it.
     const landedText = (promptField.value ?? promptField.innerText ?? promptField.textContent ?? '').trim();
     const expectedSnippet = videoPrompt.trim().slice(0, 15);
     if (!landedText || (expectedSnippet && !landedText.includes(expectedSnippet))) {
       throw new FASelectorError({
         step: STEP,
         description:
-          `ยืนยันว่า video prompt พิมพ์เข้าช่องที่ถูกต้องจริง (เจอข้อความในช่อง: "${landedText.slice(0, 80)}") ` +
-          '— ไม่ตรงกับ prompt ที่ควรพิมพ์ อาจพิมพ์เข้าช่องผิด (เช่น search box) ไม่กด Generate ต่อเพื่อป้องกันเสีย quota ฟรีๆ',
+          `ยืนยันว่าพิมพ์ video prompt เข้าไปสำเร็จจริง (เจอข้อความในช่อง: "${landedText.slice(0, 80)}") ` +
+          '— การพิมพ์อาจไม่สำเร็จ (ไม่ใช่เรื่องเลือกช่องผิด — จุดนั้นเช็คแยกแล้วใน findPromptField()) ไม่กด Generate ต่อเพื่อป้องกันเสีย quota ฟรีๆ',
         selectorsTried: SEL.promptField,
       });
     }
@@ -347,8 +438,8 @@
   async function run(payload) {
     const warnings = [];
     await ensureNewProject();
-    await uploadStoryboardImage(payload.storyboardImageDataUrl, warnings);
-    await submitVideoPrompt(payload.videoPrompt, warnings);
+    const evidenceImgs = await uploadStoryboardImage(payload.storyboardImageDataUrl, warnings);
+    await submitVideoPrompt(payload.videoPrompt, warnings, evidenceImgs);
     const result = await waitForVideo();
     await sendStepDone({
       type: FA_MSG.STEP_DONE,
