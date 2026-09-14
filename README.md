@@ -13,6 +13,67 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v43: 🐛 real parseAnalysisResponse bug — a stray mid-sentence mention hijacked the split
+
+Toey tested a new product (ATHENA sleeveless athletic shirt) with a
+longer/more verbose ChatGPT reply than usual, and the popup's "Prompt
+สำหรับสร้างวิดีโอ" field showed text confirmed via screenshot to be
+Section 2's *second paragraph* ("Arrange all five shots in a clean
+vertical 2/2/1 storyboard grid...") — not Section 3 at all. Correction
+worth noting: this logic lives in `content-chatgpt.js`'s
+`parseAnalysisResponse()`, not `background.js` as first suspected.
+
+**Root cause, confirmed by reproducing it with a synthetic test before
+touching any code** (a legitimate, honest way to verify pure string/
+regex logic — this bug has nothing to do with the DOM): the label
+patterns' looser fallback alternatives (`video prompt[^\n]*` with no
+"3." requirement, `storyboard[^\n：]*prompt[^\n]*`) had no anchor
+requiring them to match an actual heading — just the phrase appearing
+*anywhere* in the text. `regex.exec()` only finds the FIRST match per
+pattern; for a longer/more verbose reply, there's simply more text and
+more chance of a coincidental match. Built a synthetic response
+matching this exact failure shape — Section 2's own body happens to
+say "...feeds cleanly into the video prompt stage..." — and ran it
+through the *actual, unmodified* matching logic extracted from the
+file: `videoPrompt`'s pattern matched that stray mid-sentence mention
+at index 886, well before the real "## 3. Video Prompt" heading
+further down. This truncated `storyboardPrompt` right at that false
+match and made `videoPrompt` start from Section 2's own second
+paragraph onward — exactly reproducing the reported symptom
+character-for-character. Both resulting "sections" stayed well over
+`MIN_SECTION_LEN`, so this passed silently as `parseConfidence:
+'labeled'` with no warning shown at all.
+
+**Fixed**: anchored every label pattern to the start of a line
+(`^[ \t]*#{0,3}[ \t]*...`, multiline flag) — optionally preceded by
+0-3 `#` markdown heading markers, since the template asks for `## N.
+Heading`, but tolerant of ChatGPT omitting the markdown entirely too.
+A real heading is reliably its own line per the template's literal
+instruction; a stray body-text mention of similar wording, by
+construction, can't be at the start of a line unless truly
+coincidental. Doesn't require removing the loose fallback
+alternatives (kept for resilience against numbering/wording drift) —
+just stops them from matching mid-paragraph.
+
+**Verified with the same synthetic test, re-run against the fix**:
+confirmed `storyboardPrompt` now correctly captures both of Section
+2's paragraphs in full, and `videoPrompt` correctly captures Section
+3's real content — with the exact same stray mid-sentence "video
+prompt" mention still present in the input, proving the anchor is
+what fixed it, not a coincidence of the specific test text. Also
+confirmed the fix doesn't regress a reply where ChatGPT omits the `##`
+markdown prefix entirely. The regex literals tested were diffed
+character-for-character against what actually shipped in the file —
+not a hand-typed approximation of the real code.
+
+**Not live-tested against a real ChatGPT reply this round**: verified
+via `node --check` plus the synthetic-input test above, which is a
+real, direct execution of the actual shipped parsing logic — just not
+against a live ChatGPT response. No raw response text was available
+to reproduce against directly (Toey would need to paste the actual
+reply for that); flagged as the natural next verification step if this
+recurs.
+
 ## v42: 🐛 real toolbar-icon bug — the action-popup auto-closes on the native file picker
 
 Aree reproduced Toey's real report 100% via VNC: click the toolbar

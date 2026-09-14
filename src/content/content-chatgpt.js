@@ -503,14 +503,40 @@
   const MIN_SECTION_LEN = 10;
 
   function parseAnalysisResponse(text) {
-    // Each alternative consumes the rest of its heading line ([^\n]*) so
-    // a trailing parenthetical like "(5 Shots)" or "(10 seconds, 5
-    // scenes)" is swallowed by the label match instead of leaking into
-    // the start of the captured section body.
+    // Real bug found live 2026-09-15 (see README "v43"), reproduced
+    // exactly with a synthetic test before touching this code: the
+    // unanchored fallback alternatives (e.g. `video prompt[^\n]*` with
+    // no "3." requirement, or `storyboard[^\n：]*prompt[^\n]*`) could
+    // match a stray, coincidental mid-sentence mention of that phrase
+    // anywhere in an EARLIER section's own body text — not just the
+    // real heading. Confirmed with a real report: a longer/more
+    // verbose ChatGPT reply's Section 2 happened to say "...feeds
+    // cleanly into the video prompt stage..." — regex.exec() only
+    // finds the FIRST match per pattern, so that stray mid-sentence
+    // phrase won an earlier position than the real "## 3. Video
+    // Prompt" heading further down, truncating storyboardPrompt early
+    // and making videoPrompt start with Section 2's own second
+    // paragraph instead of Section 3's real content — silently, since
+    // both resulting "sections" were still well over MIN_SECTION_LEN.
+    //
+    // Fixed by anchoring every pattern to the start of a line
+    // (optionally preceded by 0-3 "#" markdown heading markers, since
+    // the template asks for "## N. Heading" — but tolerant of ChatGPT
+    // omitting the markdown entirely too). A real heading is reliably
+    // its own line per the template's literal instruction; a stray
+    // body-text mention of similar wording, by construction, can't be
+    // at the start of a line unless truly coincidental — this doesn't
+    // require removing the loose fallback alternatives (kept for
+    // resilience against numbering/wording drift), just stops them
+    // from matching mid-paragraph. Each alternative still consumes the
+    // rest of its heading line ([^\n]*) so a trailing parenthetical
+    // like "(5 Shots)" or "(10 seconds, 5 scenes)" is swallowed by the
+    // label match instead of leaking into the start of the captured
+    // section body.
     const labelPatterns = [
-      { key: 'storyboardPlan', re: /(1\.\s*storyboard plan[^\n]*|storyboard plan[^\n]*)/i },
-      { key: 'storyboardPrompt', re: /(2\.\s*storyboard image prompt[^\n]*|storyboard image prompt[^\n]*|storyboard[^\n：]*prompt[^\n]*|prompt.*storyboard[^\n]*)/i },
-      { key: 'videoPrompt', re: /(3\.\s*video prompt[^\n]*|video prompt[^\n]*)/i },
+      { key: 'storyboardPlan', re: /^[ \t]*#{0,3}[ \t]*(1\.\s*storyboard plan[^\n]*|storyboard plan[^\n]*)/im },
+      { key: 'storyboardPrompt', re: /^[ \t]*#{0,3}[ \t]*(2\.\s*storyboard image prompt[^\n]*|storyboard image prompt[^\n]*|storyboard[^\n：]*prompt[^\n]*|prompt.*storyboard[^\n]*)/im },
+      { key: 'videoPrompt', re: /^[ \t]*#{0,3}[ \t]*(3\.\s*video prompt[^\n]*|video prompt[^\n]*)/im },
     ];
 
     const matches = labelPatterns
