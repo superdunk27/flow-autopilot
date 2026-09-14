@@ -217,6 +217,26 @@
       uploadButton: [
         '.sidebar-upload-btn',
       ],
+      // Real gap found live 2026-09-15 (see README "v25"): missing
+      // entirely, not wrong. Attaching the file via fileInput above only
+      // puts it in an asset picker — it still has to be explicitly
+      // committed into the actual prompt with an "Add to prompt" button
+      // before typing the video prompt / clicking Generate, or the
+      // request goes out with no image (and, per Aree's live
+      // observation, apparently no video either — Flow seems to just no-op
+      // rather than show any error for an incomplete request, which is
+      // exactly the kind of silent-wrong-success this project exists to
+      // catch). Aree found this button live via DevTools with plain
+      // visible text "Add to prompt", no aria-label/testid at all — same
+      // pattern as newProjectButton above, so content-flow.js follows the
+      // same approach: try these CSS candidates first (cheap, in case a
+      // future redesign adds a real attribute), then fall back to
+      // FA_UTILS.findByVisibleText, which is what's confirmed to actually
+      // work today.
+      addToPromptButton: [
+        'button[aria-label*="add to prompt" i]',
+        'button[data-testid*="add-to-prompt" i]',
+      ],
       // NOT yet confirmed against live DOM — the real prompt box found
       // this round (`document.querySelectorAll('textarea,
       // [contenteditable="true"]')` inside a real project) was a bare

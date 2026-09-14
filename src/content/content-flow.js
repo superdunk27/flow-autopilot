@@ -10,6 +10,7 @@
   const STEP = FA_STEPS.FLOW;
   const GENERATE_TEXT_PATTERNS = [/^generate$/i, /generate video/i, /create video/i];
   const NEW_PROJECT_TEXT_PATTERNS = [/new project/i];
+  const ADD_TO_PROMPT_TEXT_PATTERNS = [/^add to prompt$/i, /add to prompt/i];
 
   // Same keepalive-port acceptance as content-chatgpt.js — see README "v16".
   chrome.runtime.onConnect.addListener((port) => {
@@ -132,6 +133,52 @@
     const file = FA_UTILS.dataUrlToFile(storyboardImageDataUrl, 'storyboard.png');
     await FA_UTILS.attachFileToInput(fileInput, file);
     await FA_UTILS.randomDelay(800, 1600);
+
+    // Real gap found live 2026-09-15 (see README "v25"): missing
+    // entirely, not wrong — feeding the file into fileInput above only
+    // puts it in an asset picker, which Aree confirmed live stays open
+    // afterward with an explicit "Add to prompt" button that was never
+    // clicked. Without this, submitVideoPrompt() went on to type the
+    // video prompt and click Generate anyway with no image actually
+    // committed to the prompt — and per Aree's live check of the
+    // project's "All media" (only storyboard.png present, no video),
+    // Flow appears to just silently no-op on an incomplete request
+    // rather than show any error, which is exactly the kind of
+    // silent-wrong-success this project exists to catch. Required, not
+    // soft — same reasoning as attachProductImage's required
+    // attachmentPreview gate on the ChatGPT side (see README "v7"):
+    // proceeding to Generate without confirming this succeeded would
+    // silently waste a real quota unit on an empty request.
+    let addToPromptBtn = null;
+    let addToPromptViaCss = false;
+    const addToPromptStart = Date.now();
+    while (!addToPromptBtn && Date.now() - addToPromptStart < 10000) {
+      for (const sel of SEL.addToPromptButton) {
+        try {
+          addToPromptBtn = document.querySelector(sel);
+        } catch (_) { /* ignore invalid selector */ }
+        if (addToPromptBtn) break;
+      }
+      if (addToPromptBtn) {
+        addToPromptViaCss = true;
+      } else {
+        addToPromptBtn = FA_UTILS.findByVisibleText('button', ADD_TO_PROMPT_TEXT_PATTERNS);
+      }
+      if (!addToPromptBtn) await FA_UTILS.sleep(250);
+    }
+    if (!addToPromptBtn) {
+      throw new FASelectorError({
+        step: STEP,
+        description: 'ปุ่ม "Add to prompt" (ยืนยันว่ารูป storyboard ถูกใส่เข้า prompt จริง ก่อนพิมพ์/generate)',
+        selectorsTried: [...SEL.addToPromptButton, `<text match: ${ADD_TO_PROMPT_TEXT_PATTERNS.join(', ')}>`],
+        siteHint: 'ถ้าปุ่มนี้เปลี่ยนชื่อ/ตำแหน่งอีก ตรวจ DOM จริงผ่าน DevTools แล้วปรับ selectors.js',
+      });
+    }
+    if (!addToPromptViaCss) {
+      warnings.push('⚠️ ปุ่ม "Add to prompt": หาไม่เจอด้วย selector ที่กำหนด ใช้การจับคู่จากข้อความปุ่มแทน โปรดตรวจผลลัพธ์');
+    }
+    addToPromptBtn.click();
+    await FA_UTILS.randomDelay(500, 1000);
   }
 
   async function submitVideoPrompt(videoPrompt, warnings) {

@@ -13,6 +13,58 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v25: found a missing step, not a wrong one — "Add to prompt" was never clicked
+
+Aree live-tested v24's Generate-button fix: the button was now found
+and clicked successfully (error changed from "can't find Generate" to
+"can't find the result video" — meaning Generate really did fire).
+**Zero quota spent** — Aree checked the project's "All media" panel
+directly and confirmed only `storyboard.png` was there, no video ever
+got created.
+
+Aree's own hypothesis, confirmed correct by reading the code: Google
+Flow's upload flow puts the file into an asset picker first — it has
+to be explicitly committed into the actual prompt via an "Add to
+prompt" button before the video prompt text/Generate click mean
+anything. `uploadStoryboardImage()` fed the file into the hidden
+`fileInput` and then just... stopped. It never looked for or clicked
+"Add to prompt" — that button didn't exist anywhere in
+`selectors.js` or `content-flow.js` at all. `submitVideoPrompt()` went
+on to type the prompt and click Generate anyway, with no image ever
+actually committed — and per Aree's live observation, Flow appears to
+just silently no-op on an incomplete request rather than show any
+error, which is exactly the kind of silent-wrong-success this whole
+project exists to catch (and, worse here, one that would have quietly
+burned a real quota unit for nothing).
+
+**Fixed**: new `SEL.addToPromptButton` (Aree found it live via
+DevTools — plain visible text "Add to prompt", no aria-label/testid at
+all, same pattern as `newProjectButton`), and `uploadStoryboardImage()`
+now polls for it (CSS candidates first, then `findByVisibleText`
+fallback, up to 10s) and clicks it right after the file attaches,
+before returning. Made this a **required, not soft** gate — same
+reasoning as `attachProductImage()`'s required `attachmentPreview`
+check on the ChatGPT side (see v7): proceeding to Generate without
+confirming the image actually landed in the prompt would risk silently
+wasting a real, scarce (~5/day) quota unit on an empty request again.
+
+**Honest limit on this fix**: built from Aree's live report of the
+button's existence and behavior, not from live DOM access this round —
+whether clicking it actually results in `submitVideoPrompt()`'s
+`promptField` search finding the *same* field the image just landed
+in (rather than some other now-revealed field) has not been directly
+confirmed; `submitVideoPrompt()` already does its own fresh
+`waitFor(SEL.promptField, ...)` after this returns, which should
+naturally re-query whatever the DOM looks like at that point regardless,
+but this is inference, not a live-confirmed detail.
+
+**Not live-tested this round**: verified via `node --check` only. No
+quota was spent — Aree's report was itself already a no-quota-spent
+finding, and this fix doesn't change that Generate still fires exactly
+once per attempt (same click-count guarantee re-verified in v24, still
+holds — nothing about *when* the click happens changes *how many*
+times it happens).
+
 ## v24: 🎉 reached Google Flow for the first time this session — fixed generateButton selector
 
 Milestone: the pipeline reached step 3 (Google Flow) for the first
