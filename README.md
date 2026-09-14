@@ -13,6 +13,36 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v41: v11 template — clarify doodles should still move even when the camera doesn't
+
+v10 (and earlier) said Shot 1/5 use "a completely static camera with
+only gentle ambient motion" without clarifying that the doodles
+(sparkle/heart/sound-wave/curved-line accents) should still float or
+breathe like in every other scene — risking these two shots rendering
+as a single frozen still image just because the camera itself doesn't
+move.
+
+Single-sentence replacement (a full replace this time, not an append)
+in Section 3's Shot 1/5 camera-motion sentence — v7's text-lock, v9's
+crop, and v10's styling-lock CRITICAL paragraphs kept exactly as-is.
+Copied verbatim from `ψ/active/flow-autopilot-extension.md` "Update
+2026-09-14 v11", verified with the same 3 checks as v9/v10:
+1. **Verbatim match** — new sentence present, old one genuinely
+   absent (unlike v10's append, this is a full replace).
+2. **Splice-reconstruction** — old template with the old sentence
+   swapped for the new one, at the same index, equals the actual new
+   template byte-for-byte.
+3. **Length arithmetic** — +249 chars, matching the sentence pair's
+   own length delta exactly.
+
+Every other sentence — v7/v9/v10's CRITICAL paragraphs, Sections 1,
+2, and the rest of Section 3 — confirmed byte-identical to v10. All 3
+section headings unchanged — no parse-code impact.
+
+**Not live-tested this round**: `node --check` confirms the file
+parses; the real test is the next live video generation checking
+whether Shot 1/5 now show doodle motion instead of looking frozen.
+
 ## v40: v10 template — extend the text lock to visual styling, not just wording
 
 v7's text-lock rule locked the *wording* of each scene's on-screen

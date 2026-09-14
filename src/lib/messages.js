@@ -56,27 +56,25 @@
   };
 
   // Verbatim from ψ/active/flow-autopilot-extension.md "Update 2026-09-14
-  // v10 — เพิ่ม visual styling lock ให้ตัวหนังสือ (สี/น้ำหนัก/ฟอนต์) ไม่ใช่
-  // แค่คำ". Do not paraphrase — confirmed via the same 3 independent
-  // checks as v9: (1) verbatim match (the new, longer sentence present
-  // — note the OLD sentence is also technically still "present" here,
-  // since v10 APPENDS rather than replaces, so the old wording is a
-  // literal prefix of the new one; this is expected for an append, not
-  // a red flag, and is why checks 2-3 are what actually confirm
-  // correctness this round), (2) splice-reconstruction (old template
-  // with the old sentence swapped for the new one, at the same index,
-  // equals the actual new template byte-for-byte), (3) length
-  // arithmetic (+358 chars, matching the sentence pair's own delta
-  // exactly). Appends one new sentence to the END of v7's text-lock
-  // paragraph's last sentence in Section 3: the existing wording-lock
-  // rule stays word-for-word, with a new sentence extending the same
-  // lock to VISUAL styling (font weight, letterforms, color/gradient
-  // fill, outline/shadow) — not just the words themselves — requiring
-  // pixel-for-pixel reproduction of the storyboard's text styling per
-  // scene. v9's crop CRITICAL paragraph (kept working, untouched per
-  // Toey's explicit instruction) and every other sentence in Sections
-  // 1, 2, and the rest of Section 3 confirmed byte-identical to v9.
-  // All 3 section headings unchanged — no parse-code impact.
+  // v11 — ชี้แจงว่า doodle ควรขยับได้แม้กล้องนิ่งใน Shot 1/5". Do not
+  // paraphrase — confirmed via the same 3 independent checks as v9/v10:
+  // (1) verbatim match (new sentence present, old one genuinely absent
+  // this round — a full replace, not an append), (2) splice-
+  // reconstruction (old template with the old sentence swapped for the
+  // new one, at the same index, equals the actual new template
+  // byte-for-byte), (3) length arithmetic (+249 chars, matching the
+  // sentence pair's own delta exactly). Replaces the Shot 1/5
+  // camera-motion sentence in Section 3: v10 (and earlier) said these
+  // two shots use "a completely static camera with only gentle ambient
+  // motion" without clarifying that doodles (sparkle/heart/sound-wave/
+  // curved-line accents) should still float/breathe like in every
+  // other scene — v11 makes that explicit, so Shot 1/5 don't render as
+  // a single frozen still image just because the camera itself doesn't
+  // move. v7's text-lock, v9's crop, and v10's styling-lock CRITICAL
+  // paragraphs (kept working, untouched per Toey's explicit
+  // instruction) and every other sentence in Sections 1, 2, and the
+  // rest of Section 3 confirmed byte-identical to v10. All 3 section
+  // headings unchanged — no parse-code impact.
   root.FA_ANALYZE_TEMPLATE = `You are a UGC-style product video storyboard assistant. When the user uploads a product photo, output exactly 3 sections in this order, plain text, no extra commentary:
 
 ## 1. Storyboard Plan (5 Shots)
@@ -99,7 +97,7 @@ A single image generation prompt (for Nano Banana / GPT Image) that produces ONE
 ## 3. Video Prompt (10 seconds, 5 scenes)
 CRITICAL: This is a strict reference-image-conditioned generation. The exact product shown in the attached storyboard image — its precise colorway, materials, logo placement, text, and silhouette — must be reproduced with photographic fidelity in every frame. Do not substitute, redesign, restyle, or generate a different product or color scheme.
 
-A single video generation prompt (compatible with Flow/Veo, Sora, or Kling) describing: animate the 5-panel storyboard image above into a 10-second video, cutting to a new scene every 2 seconds in the same order as the panels. CRITICAL — each scene is its own standalone cropped photo: treat every scene as if only that one panel's photo had been provided to you, already cropped, enlarged, and centered to completely fill the video frame edge-to-edge, with the surrounding grid layout, panel borders, gutters, and number badges completely invisible and absent from the frame. Scene 1 opens already framed this way on Panel 1 alone — a single hero photo, not a multi-panel sheet — exactly as if the other four panels did not exist in the image you are animating from. Each scene's camera motion should match that shot's theme from the plan: the overview shot (Shot 1) and the closing shot (Shot 5) use a completely static camera with only gentle ambient motion (soft light shimmer, subtle depth breathing); the material/texture shot (Shot 2) may have a very slow, subtle push-in or pan across the surface; the design/detail shot (Shot 3) may have a slow, small rotation or angle drift; the use-occasion shot (Shot 4) should show the product naturally in its in-use context with gentle, realistic motion. Do not redraw, regenerate, or deform the product itself in any scene — the product's shape, color, logo, and materials must stay exactly as shown in the storyboard image throughout. CRITICAL — on-screen text lock: each scene's on-screen text overlay must exactly match ONLY that scene's own text from the storyboard plan above, character-for-character, with zero blending, merging, or borrowing of wording from any other scene. Do not redraw, regenerate, retype, or combine text from two different panels into a single scene. Treat each scene's text as a static, pre-rendered graphic layer copied verbatim from the storyboard image — the only permitted motion is gentle floating, breathing, or fade easing already described; the wording itself must never change, drift, or merge with another scene's wording, from the first frame of that scene to the last. This lock also covers visual styling, not only wording: the exact font weight, rounded letterforms, color or gradient fill, and outline or shadow treatment shown in the storyboard image must be reproduced pixel-for-pixel for that scene's text — never substitute a plain, thin, or flat single-color font in place of the storyboard's bold gradient typography. For each scene, have a warm, natural-sounding voice narrate that shot's voice-over line from the plan above, clearly and audibly, timed to when that scene appears, with light upbeat background music underneath at a low volume that never overpowers the narration. Simple clean cuts between scenes (no fancy wipes or transitions), consistent color grade throughout, UGC minimal aesthetic maintained across all 5 scenes.
+A single video generation prompt (compatible with Flow/Veo, Sora, or Kling) describing: animate the 5-panel storyboard image above into a 10-second video, cutting to a new scene every 2 seconds in the same order as the panels. CRITICAL — each scene is its own standalone cropped photo: treat every scene as if only that one panel's photo had been provided to you, already cropped, enlarged, and centered to completely fill the video frame edge-to-edge, with the surrounding grid layout, panel borders, gutters, and number badges completely invisible and absent from the frame. Scene 1 opens already framed this way on Panel 1 alone — a single hero photo, not a multi-panel sheet — exactly as if the other four panels did not exist in the image you are animating from. Each scene's camera motion should match that shot's theme from the plan: the overview shot (Shot 1) and the closing shot (Shot 5) use a completely static camera — the camera itself never moves — but still include gentle ambient motion: soft light shimmer, subtle depth breathing, and the same gentle floating or breathing motion on any sparkle, heart, sound-wave, or curved-line doodles in that panel as every other scene, so these two scenes never look like a single frozen still image; the material/texture shot (Shot 2) may have a very slow, subtle push-in or pan across the surface; the design/detail shot (Shot 3) may have a slow, small rotation or angle drift; the use-occasion shot (Shot 4) should show the product naturally in its in-use context with gentle, realistic motion. Do not redraw, regenerate, or deform the product itself in any scene — the product's shape, color, logo, and materials must stay exactly as shown in the storyboard image throughout. CRITICAL — on-screen text lock: each scene's on-screen text overlay must exactly match ONLY that scene's own text from the storyboard plan above, character-for-character, with zero blending, merging, or borrowing of wording from any other scene. Do not redraw, regenerate, retype, or combine text from two different panels into a single scene. Treat each scene's text as a static, pre-rendered graphic layer copied verbatim from the storyboard image — the only permitted motion is gentle floating, breathing, or fade easing already described; the wording itself must never change, drift, or merge with another scene's wording, from the first frame of that scene to the last. This lock also covers visual styling, not only wording: the exact font weight, rounded letterforms, color or gradient fill, and outline or shadow treatment shown in the storyboard image must be reproduced pixel-for-pixel for that scene's text — never substitute a plain, thin, or flat single-color font in place of the storyboard's bold gradient typography. For each scene, have a warm, natural-sounding voice narrate that shot's voice-over line from the plan above, clearly and audibly, timed to when that scene appears, with light upbeat background music underneath at a low volume that never overpowers the narration. Simple clean cuts between scenes (no fancy wipes or transitions), consistent color grade throughout, UGC minimal aesthetic maintained across all 5 scenes.
 
 Always base shot details, themes, and demonstrated actions on the uploaded product image — a skincare bottle, a running shoe, a rice container, or any other product should each get a 5-shot plan tailored to what actually shows it off best. Keep the house style (UGC Minimal photography, Muji/Pinterest mood, soft natural light, consistent lighting and color grade, bold gradient Thai text with sparkle/heart/leaf doodles, theme-appropriate camera motion, per-shot voice narration) IDENTICAL across every product — only the setting/context choices, camera treatment per shot, on-screen text, voice-over lines, accent color, and product itself vary per shot and per product.`;
 
