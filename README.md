@@ -13,6 +13,56 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v24: 🎉 reached Google Flow for the first time this session — fixed generateButton selector
+
+Milestone: the pipeline reached step 3 (Google Flow) for the first
+time this session — `storyboard.png` uploaded successfully, image
+preview displayed correctly. Then hit `FASelectorError` at
+`submitVideoPrompt()` looking for the Generate button.
+
+Aree diagnosed live via real DevTools `querySelectorAll('button')` on
+the actual page — both the primary selector AND its text fallback were
+simultaneously dead, for two independent reasons: (1) the real
+`aria-label` is `"Start generation"`, not `"Generate"` — Google renamed
+it; (2) the button's visible "text" is a Material Symbols icon
+ligature (`"arrow_forward"`, a literal arrow icon), not a word at all —
+`findByVisibleText`'s `GENERATE_TEXT_PATTERNS` (`/^generate$/i`,
+`/generate video/i`, `/create video/i`) could never have matched an
+icon ligature no matter what it said, so the fallback was never a real
+safety net for this specific button to begin with.
+
+**Fixed**: `SEL.generateButton` now tries `button[aria-label*="generation" i]`
+first — the noun ("generation"), not the verb ("Generate") — deliberately
+broader than matching `"Start generation"` verbatim, so a future rename
+like `"Begin generation"` doesn't break it the same way `"Generate"` →
+`"Start generation"` just did. Old `"Generate"`/`data-testid` patterns
+kept as fallbacks in case Google reverts. The text-pattern fallback in
+`content-flow.js` is left in place too (harmless), but documented as
+known-dead against the current icon-only button — kept only in case a
+future DOM revision adds real visible text back.
+
+**Quota safety, checked explicitly since Aree flagged Flow's harsh
+~5/day generate limit**: confirmed by reading `submitVideoPrompt()` —
+`generateBtn.click()` fires exactly once, at the very end, with no
+retry loop around the click itself (unlike `attachProductImage()`'s
+3-attempt retry for file attach). This fix only changes which selector
+*finds* the button; it doesn't add or remove anything about how many
+times it gets clicked once found. **Separately worth flagging, not
+fixed here** (pre-existing architecture, not introduced by this
+change, and not what was asked): a user-initiated `RETRY_STEP` after
+Generate has already fired successfully but a *later* step fails (e.g.
+`waitForVideo()`) would re-open a fresh Flow tab and re-run the whole
+step from `ensureNewProject()`, clicking Generate again — spending a
+second quota unit for what's logically a retry of a later failure, not
+of generation itself. Not addressed in this round since it wasn't the
+ask and deserves its own deliberate design, not a rushed change on a
+step with real per-click cost.
+
+**Not live-tested this round**: verified via `node --check` only, and
+by re-reading the click-count logic directly (not assumed) given the
+quota stakes — Aree had not yet clicked Generate even once when this
+was reported, so no quota was spent diagnosing or fixing this.
+
 ## v23: QA caught v22's ceiling math — widened again with real margin, not just past it
 
 QA reviewed e572ecf and did the arithmetic v22 skipped: v22's "roughly

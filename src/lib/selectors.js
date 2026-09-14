@@ -236,13 +236,28 @@
         'textarea',
         'div[contenteditable="true"]',
       ],
+      // PROVEN WRONG live 2026-09-15 (see README "v24") — real DOM
+      // (confirmed by Aree via DevTools querySelectorAll('button') on
+      // the live page): the button's real aria-label is "Start
+      // generation", not "Generate" — Google renamed it. Its visible
+      // "text" is a Material Symbols icon ligature ("arrow_forward"),
+      // not a word at all, so the findByVisibleText text-pattern
+      // fallback below could never have matched it either — both the
+      // primary selector AND its fallback were simultaneously dead.
+      // `aria-label*="generation" i` (the noun, not "Generate" the
+      // verb) is intentionally broader than "Start generation" alone,
+      // to survive a future rewording like "Begin generation" the same
+      // way this one didn't survive "Generate" -> "Start generation".
       // No structural fallback (`button[type="submit"]` was removed — SPA
       // buttons rarely use native submit, and it risks matching an
       // unrelated dialog's submit button). content-flow.js falls back to
       // `FA_UTILS.findByVisibleText` (matches visible button text like
       // "Generate") instead, which is a more specific last resort than a
-      // structural guess.
+      // structural guess — though per the above, that text fallback is
+      // known dead against the current icon-ligature button; kept only
+      // in case a future DOM revision adds real visible text back.
       generateButton: [
+        'button[aria-label*="generation" i]',
         'button[aria-label*="Generate" i]',
         'button[data-testid*="generate" i]',
       ],
