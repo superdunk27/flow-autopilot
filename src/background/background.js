@@ -230,20 +230,32 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // step that's still genuinely working never trips this — it only fires
 // if the content script's response never arrives at all.
 //
-// CHATGPT_STEP_CEILING_MS widened 2026-09-15 (see README "v22"): for
-// imagegen specifically, the content script's own worst-case internal
-// budget is no longer just the 5-minute generation-wait — it's that
-// wait *plus* waitForGeneratedImage()'s own timeout (widened the same
-// round, to 3 min, after the v4 template's more complex prompt was
-// confirmed live to genuinely need more time than the old 60s budget).
-// Sequentially, page-ready + attach + type/send + 5min generation-wait
-// + 3min image-wait adds up to roughly 10-11 minutes worst case for
-// imagegen — the old 8-minute ceiling was no longer comfortably above
-// that, and could fire while the content script was still legitimately
-// working. Widened past FLOW_STEP_CEILING_MS's value, not because
-// imagegen is expected to take as long as a real video render, but to
-// keep real margin above the computed worst case above.
-const CHATGPT_STEP_CEILING_MS = 12 * 60 * 1000;
+// CHATGPT_STEP_CEILING_MS widened 2026-09-15, then widened again the
+// same day after QA caught the first widening's math (see README
+// "v23"): the "roughly 10-11 minutes" estimate for imagegen's own
+// worst-case internal budget was itself an underestimate — QA
+// recomputed it precisely from every actual timeout constant in
+// content-chatgpt.js and found ≈772s (≈12.87 min), which the 12-minute
+// ceiling from the first widening didn't actually clear. Independently
+// re-verified against the live code (not just trusted), summing every
+// wait in the imagegen path: waitForPageReady 62.5s (20+20+1.5+20+1,
+// composer + plusMenuButton + settle + re-render retry + settle) +
+// attachProductImage 142.5s (3 attempts x up to 45s each + 2.5s + 5s
+// backoff between them) + randomDelay(500,1100)+randomDelay(400,900)
+// ~2s + composer waitFor 20s + waitForSendButtonReady ~65s worst case
+// (its 45s budget is measured from before its own initial 20s locate,
+// so usually bounded near 45s total, but a pathological detach-and-
+// relocate right at that boundary can add another ~20s) +
+// waitForGenerationComplete 300s + waitForGeneratedImage 180s (widened
+// same round for the v4 template) = 772s. The 12-minute (720s) ceiling
+// missed that by ~52s. Widened to 14 minutes for real margin above the
+// verified worst case, not just barely past it.
+const CHATGPT_STEP_CEILING_MS = 14 * 60 * 1000;
+// FLOW_STEP_CEILING_MS is unchanged (still 12 min) — QA's review and
+// the recomputation above were specifically about the chatgpt.com
+// steps; Flow's own worst-case ("10 min for Flow's video" per the
+// original doc comment) was never in question here, so left as-is
+// rather than bumped without a specific reason.
 const FLOW_STEP_CEILING_MS = 12 * 60 * 1000;
 
 async function startAnalyzeStep(productImageDataUrl) {

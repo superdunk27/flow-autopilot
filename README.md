@@ -13,6 +13,38 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v23: QA caught v22's ceiling math — widened again with real margin, not just past it
+
+QA reviewed e572ecf and did the arithmetic v22 skipped: v22's "roughly
+10-11 minutes worst case" for imagegen was itself an underestimate. QA
+summed every actual timeout constant in the imagegen path and got
+≈772s (≈12.87 min) — past the 12-minute (720s) ceiling v22 had just
+set, by about 52s. Independently re-verified this against the live
+code rather than trusting either estimate, term by term:
+`waitForPageReady` 62.5s (composer 20s + plusMenuButton 20s + settle
+1.5s + re-render-retry composer 20s + settle 1s) + `attachProductImage`
+142.5s (3 attempts × up to 45s each + 2.5s + 5s backoff between them) +
+two `randomDelay` calls ~2s + composer `waitFor` 20s +
+`waitForSendButtonReady` ~65s worst case (its 45s budget is measured
+from before its own initial 20s locate call, so normally bounded near
+45s total, but a pathological detach-and-relocate right at that
+boundary can add another ~20s) + `waitForGenerationComplete` 300s +
+`waitForGeneratedImage` 180s (widened the same round as v22, for the
+v4 template) = **772s**, confirming QA's number.
+
+**Fixed**: `CHATGPT_STEP_CEILING_MS` widened again, from 12 to 14
+minutes — real margin (≈68s) above the verified 772s worst case this
+time, not just barely clearing it. `FLOW_STEP_CEILING_MS` left
+unchanged at 12 minutes — QA's review and this recomputation were
+specifically about the chatgpt.com steps; Flow's own worst-case budget
+("10 min for Flow's video" per the ceilings' original doc comment) was
+never in question here, so it wasn't bumped without a specific reason
+to.
+
+Aree was live-testing v4 + e572ecf in parallel while QA's review came
+in — analyze already confirmed working; imagegen's result against the
+new (now further-widened) timeout is still pending.
+
 ## v22: widened waitForGeneratedImage's timeout — v4's prompt genuinely takes longer
 
 Aree tested the v4 template live (eba1dd2 + 100550c) and hit the same
