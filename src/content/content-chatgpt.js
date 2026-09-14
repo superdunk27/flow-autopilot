@@ -73,14 +73,23 @@
     const file = FA_UTILS.dataUrlToFile(productImageDataUrl, 'product.png');
     await FA_UTILS.attachFileToInput(fileInput, file);
 
-    // The exact "attachment finished uploading" indicator is unverified
-    // against live DOM (see selectors.js comment) — a real user hit a
-    // clean "selector not found" here even though the upload had
-    // genuinely succeeded. Treat it as an optional confidence signal
-    // only (never throws) and gate on the send button actually becoming
-    // enabled instead — a functional readiness signal the site has to
-    // get right for its own UI to work, not a guess at its markup.
-    await FA_UTILS.softWaitFor(SEL.attachmentPreview, { timeoutMs: 8000 });
+    // REQUIRED gate, not optional — a real user hit exactly the failure
+    // this was previously soft about: the send button became enabled
+    // from having *text* alone, with no file actually attached, so the
+    // message went out with no image and ChatGPT replied asking for the
+    // photo (2026-09-14 bug report). button[aria-label^="Remove file"]
+    // was independently CONFIRMED live the same day (see README "v5") as
+    // the real "an attachment is present" indicator, so it's no longer
+    // an unverified guess — waiting on the send button becoming enabled
+    // is a *necessary* signal (composer is ready) but not a *sufficient*
+    // one (an attachment is actually there); this checks the sufficient
+    // condition explicitly instead of assuming it.
+    const attachmentChip = await FA_UTILS.waitFor(SEL.attachmentPreview, {
+      step,
+      description: 'ภาพตัวอย่างไฟล์แนบ (ยืนยันว่าอัปโหลดสำเร็จจริงก่อนพิมพ์/ส่ง)',
+      timeoutMs: 15000,
+    });
+    collectWarning(warnings, attachmentChip, SEL.attachmentPreview, 'ภาพตัวอย่างไฟล์แนบ');
     await FA_UTILS.randomDelay(500, 1100);
 
     const composer = await FA_UTILS.waitFor(SEL.composer, {
@@ -96,9 +105,31 @@
     });
     await FA_UTILS.waitForEnabled(sendBtn, {
       step,
-      description: 'ปุ่มส่ง (รอจนกดได้ — ยืนยันว่าอัปโหลด/พิมพ์เสร็จจริง)',
+      description: 'ปุ่มส่ง (รอจนกดได้ — แต่ปุ่ม enabled ไม่ได้แปลว่ามีไฟล์แนบอยู่จริง เช็คแยกด้านล่างอีกที)',
       timeoutMs: 30000,
     });
+
+    // Final re-check right before sending: the attachment chip found
+    // above could in principle have been removed between then and now
+    // (e.g. a stray click, a re-render). This is the literal last chance
+    // to catch "about to send with no image attached" before it happens
+    // — throws instead of silently sending text-only, which is exactly
+    // the failure mode being fixed here.
+    const stillAttached = SEL.attachmentPreview.some((sel) => {
+      try {
+        return !!document.querySelector(sel);
+      } catch (_) {
+        return false;
+      }
+    });
+    if (!stillAttached) {
+      throw new FASelectorError({
+        step,
+        description: 'ยืนยันไฟล์แนบก่อนกดส่ง (ไฟล์แนบหายไปก่อนกดส่งจริง — ไม่ส่งข้อความเปล่าๆ)',
+        selectorsTried: SEL.attachmentPreview,
+      });
+    }
+
     sendBtn.click();
 
     await FA_UTILS.waitForGenerationComplete(SEL.stopGeneratingButton, {
@@ -222,9 +253,31 @@
     return nodes[nodes.length - 1].innerText.trim();
   }
 
+  /**
+   * Defense-in-depth check (see FAMissingImageError in dom-utils.js): the
+   * pre-send attachment-chip verification in attachAndSend should make
+   * "sent with no image" impossible now, but if ChatGPT's reply reads
+   * like it never received the photo anyway, treat that as an explicit
+   * error instead of silently parsing/using whatever text came back.
+   * Tolerant of no assistant message existing yet — that case is a
+   * different, more specific error raised elsewhere (extractLastAssistantText
+   * for analyze, the generatedImage waitFor timeout for imagegen).
+   */
+  function checkForMissingImageReply(step) {
+    const nodes = document.querySelectorAll(
+      Array.isArray(SEL.assistantMessages) ? SEL.assistantMessages.join(', ') : SEL.assistantMessages
+    );
+    if (!nodes.length) return;
+    const text = nodes[nodes.length - 1].innerText;
+    if (FA_UTILS.detectChatGptMissingImageReply(text)) {
+      throw new FAMissingImageError({ step, replyText: text });
+    }
+  }
+
   async function runAnalyze(payload) {
     const warnings = [];
     await attachAndSend({ step: FA_STEPS.ANALYZE, ...payload, warnings });
+    checkForMissingImageReply(FA_STEPS.ANALYZE);
     const raw = extractLastAssistantText();
     const parsed = parseAnalysisResponse(raw);
     chrome.runtime.sendMessage({
@@ -238,6 +291,7 @@
   async function runImageGen(payload) {
     const warnings = [];
     await attachAndSend({ step: FA_STEPS.IMAGEGEN, ...payload, warnings });
+    checkForMissingImageReply(FA_STEPS.IMAGEGEN);
     const imgEl = await FA_UTILS.waitFor(SEL.generatedImage, {
       step: FA_STEPS.IMAGEGEN,
       description: 'ภาพ storyboard ที่ ChatGPT สร้าง',

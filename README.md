@@ -13,6 +13,60 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v7: fixed a real blocking bug — sent messages with no image attached
+
+Real bug report from Toey's own testing (with screenshot evidence): the
+analyze step sent the full `FA_ANALYZE_TEMPLATE` message successfully
+(visible in the chat), but **the product photo never actually attached**
+— ChatGPT replied "Please upload the product photo so I can base all 5
+shots on the actual product." The extension then made no further
+progress.
+
+**Root cause**: the v5 fix made the "attachment finished uploading"
+check (`attachmentPreview`) an optional soft signal, gating only on the
+send button becoming *enabled*. That was based on an incomplete
+assumption — button-enablement turned out to be necessary but not
+sufficient: the send button apparently enables from having *text* in the
+composer alone, with no attached file required. So the pipeline could
+(and did) send a text-only message believing it had verified the
+attachment, because it had only verified the composer was ready to send
+*something*.
+
+The irony: by the time this bug shipped, `attachmentPreview`
+(`button[aria-label^="Remove file"]`) had already been independently
+CONFIRMED correct via the v5 live-DOM round — it just hadn't been
+promoted back to a required check. Fixed three ways, addressing all
+three points raised:
+
+1. **`attachmentPreview` is a required gate again**, not optional —
+   `attachAndSend()` now does `FA_UTILS.waitFor()` (throws on failure) on
+   it right after attaching the file, before doing anything else. This
+   is the correct call now that the selector is confirmed, not a guess.
+2. **A second, final check runs immediately before clicking Send** —
+   re-verifies the attachment chip is *still* present at that exact
+   moment (in case it were somehow removed between the first check and
+   send), throwing a specific error instead of proceeding if it's gone.
+   This is the literal last chance to catch "about to send with no
+   image" before it happens.
+3. **Defense-in-depth**: `FA_UTILS.detectChatGptMissingImageReply()`
+   scans the assistant's actual reply for phrasing indicating it never
+   received an image ("please upload/attach/provide a photo", "I don't
+   see an image", "no image was attached", etc.) and throws
+   `FAMissingImageError` if matched — checked right after
+   `attachAndSend()` returns, before the reply is trusted as real
+   storyboard content, in both the analyze and image-gen steps. This
+   should be unreachable now that (1) and (2) are in place, but catches
+   it anyway if some other cause ever reproduces the same symptom, rather
+   than silently parsing ChatGPT's "please upload a photo" as if it were
+   the expected 3-section response.
+
+Verified: unit-tested `detectChatGptMissingImageReply()` against the
+exact real reply text from Toey's bug report (confirmed detected) plus
+normal storyboard text and two other phrasing variants (confirmed not a
+false positive / confirmed detected respectively); confirmed
+`FAMissingImageError` and the detection function are loaded and callable
+inside the real content-script isolated world via CDP.
+
 ## v6: Flow upload flow — real 2-click path found
 
 A follow-up round after Toey reloaded the Flow tab (clearing a stuck
@@ -68,8 +122,10 @@ function against that real text — clean split, `parseConfidence:
 - `attachmentPreview`: the 3 original guesses were confirmed wrong (as a
   real user had already hit). Real markup instead exposes `button[aria-
   label^="Remove file"]` inside a `[class*="file-tile"]` container — now
-  primary, though (per the v4 redesign) it's a soft signal, not a hard
-  gate.
+  primary. (Was briefly downgraded to a soft signal after this v5 fix,
+  since it was unverified at the time — that turned out to be the wrong
+  call once it *was* verified here and stayed soft anyway; see "v7",
+  which made it a required gate again now that it's confirmed correct.)
 - `composer` (`#prompt-textarea`), `sendButton`
   (`button[data-testid="send-button"]`), `plusMenuButton`
   (`button[data-testid="composer-plus-btn"]`), and `assistantMessages`
@@ -153,7 +209,11 @@ surfaces that no amount of unauthenticated inspection can:
   optional soft signal (`FA_UTILS.softWaitFor`, never throws) and gates
   on the send button becoming *enabled* instead (`FA_UTILS.waitForEnabled`)
   — a functional readiness signal the site has to get right for its own
-  UI to work, not a guess at its internal markup.
+  UI to work, not a guess at its internal markup. **(Reversed in "v7"
+  below**: button-enablement turned out to require text alone, not an
+  actual attachment — this soft-gating design is what let a real
+  text-only send through undetected. Kept here as the historical record
+  of the reasoning that led there.)
 - **Image-gen step needs explicit "Create image" mode.** Per real usage,
   just typing an image request in plain text on a fresh chat isn't
   enough — the composer's "+" menu has to be opened and "Create image"

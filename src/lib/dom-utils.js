@@ -69,6 +69,40 @@
     return m ? m[1] : true;
   }
 
+  class FAMissingImageError extends Error {
+    constructor({ step, replyText }) {
+      super(
+        `[Flow Autopilot] ChatGPT ตอบกลับมาว่าไม่เห็นรูปที่แนบ ในขั้น "${step}" ` +
+          `(ข้อความ: "${(replyText || '').slice(0, 150)}") — แปลว่ารูปไม่ได้แนบไปกับข้อความจริง ` +
+          `แม้จะยืนยัน attachment chip ก่อนกดส่งแล้วก็ตาม ตรวจสอบ selector ใน src/lib/selectors.js ` +
+          `(fileInput/attachmentPreview) อีกครั้ง — เว็บอาจเปลี่ยน DOM หรือมีสาเหตุอื่นที่ยังไม่ทราบ`
+      );
+      this.name = 'FAMissingImageError';
+      this.step = step;
+    }
+  }
+
+  /**
+   * Defense-in-depth for a real bug (2026-09-14): the send button could
+   * become enabled from text alone, with no file actually attached, so a
+   * message went out with no image and ChatGPT replied asking for the
+   * photo instead of returning the expected storyboard. The pre-send
+   * attachment-chip check in content-chatgpt.js should make this
+   * scenario impossible going forward, but this catches it anyway if it
+   * somehow still happens (DOM change, a chip that renders but doesn't
+   * mean what we think, etc.) rather than silently treating ChatGPT's
+   * "please upload a photo" reply as if it were the real storyboard
+   * response.
+   */
+  function detectChatGptMissingImageReply(text) {
+    if (!text) return false;
+    return (
+      /please (upload|attach|share|provide|send).{0,40}(product )?(photo|image)/i.test(text) ||
+      /\bi (don'?t|do not) (see|have)\b.{0,20}(image|photo)/i.test(text) ||
+      /(no|without) (an )?image (was |has been )?(attached|uploaded|provided|received)/i.test(text)
+    );
+  }
+
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const randomDelay = (minMs, maxMs) =>
@@ -343,8 +377,10 @@
     typeIntoComposer,
     serializeError,
     detectChatGptRateLimit,
+    detectChatGptMissingImageReply,
   };
   root.FASelectorError = FASelectorError;
   root.FATimeoutError = FATimeoutError;
   root.FARateLimitError = FARateLimitError;
+  root.FAMissingImageError = FAMissingImageError;
 })(typeof window !== 'undefined' ? window : globalThis);
