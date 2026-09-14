@@ -13,6 +13,40 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v40: v10 template — extend the text lock to visual styling, not just wording
+
+v7's text-lock rule locked the *wording* of each scene's on-screen
+text. v10 extends the same lock to the text's *visual styling* — font
+weight, letterforms, color/gradient fill, outline/shadow — so the
+video model can't correctly reproduce the wording while silently
+swapping in a plain, thin, flat-color font in place of the
+storyboard's bold gradient typography.
+
+Appends one new sentence to the end of v7's text-lock paragraph's last
+sentence in Section 3 (the existing wording-lock sentence stays
+word-for-word; a new sentence follows it) — v9's crop CRITICAL
+paragraph kept exactly as-is per explicit instruction. Copied verbatim
+from `ψ/active/flow-autopilot-extension.md` "Update 2026-09-14 v10",
+verified with the same 3 checks as v9:
+1. **Verbatim match** — the new, longer sentence is present. (Note:
+   the *old* sentence is also technically still present here, since
+   v10 *appends* rather than replaces — the old wording is a literal
+   prefix of the new sentence. Expected for an append, not a red flag;
+   checks 2–3 are what actually confirm correctness this round.)
+2. **Splice-reconstruction** — old template with the old sentence
+   swapped for the new one, at the same index, equals the actual new
+   template byte-for-byte.
+3. **Length arithmetic** — +358 chars, matching the sentence pair's
+   own length delta exactly.
+
+Every other sentence — v9's crop paragraph, Sections 1, 2, and the
+rest of Section 3 — confirmed byte-identical to v9. All 3 section
+headings unchanged — no parse-code impact.
+
+**Not live-tested this round**: `node --check` confirms the file
+parses; the real test is the next live video generation checking
+whether on-screen text styling now matches the storyboard image too.
+
 ## v39: v9 template — reframe the crop instruction as positive framing, not a prohibition
 
 v8's "CRITICAL — per-scene crop" paragraph was phrased as a
