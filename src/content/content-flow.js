@@ -54,35 +54,79 @@
     }
   }
 
+  // A real, confirmed-live project URL always looks like
+  // flow.google.com/project/<uuid> (confirmed in this exact session,
+  // multiple times — e.g. the v27+ evidence-based fixes were verified
+  // against a real project at this URL shape). Used below as the one
+  // concrete, checkable signal that a genuinely new project actually
+  // exists, instead of trusting an unverified assumption.
+  const PROJECT_URL_RE = /\/project\/[0-9a-fA-F-]+/;
+
+  /**
+   * Real gap found live 2026-09-15 (see README "v44"), reported by
+   * Toey from real hands-on use: "sometimes creates a new project,
+   * sometimes doesn't" — matching exactly the residual risk QA flagged
+   * back when openVideoAssetFromPicker() (v33/v34) was built: its own
+   * "at most one video in a fresh project" invariant silently breaks
+   * if ensureNewProject() ever lands in a stale/reused project instead
+   * of a genuinely new one. The previous version wrapped everything in
+   * a blanket try/catch that swallowed ANY failure — including the
+   * click itself throwing, and including "New project" button not
+   * found — under the single, never-actually-checked comment "assume
+   * we're already in a project context." That assumption was never
+   * verified against anything.
+   *
+   * Fixed with the same "verify against a real confirmed signal,
+   * don't silently assume" pattern already used throughout this
+   * codebase: if no button is found, check the current URL already
+   * matches a real project pattern before treating that as fine — and
+   * if the button IS found and clicked, require the URL to actually
+   * change to a (different, genuinely new) project URL before
+   * returning, instead of a blind fixed delay. A step that can't
+   * confirm either now throws loudly instead of proceeding on an
+   * unverified guess.
+   */
   async function ensureNewProject() {
-    // If a "New project" affordance is visible (i.e. we're not already
-    // inside a project), click it. If we're already in a project (e.g.
-    // Flow navigated us there directly), this is a no-op — the upload
-    // dropzone check right after will just proceed.
-    //
-    // CONFIRMED live 2026-09-14: real DOM query found the "New project"
-    // button has NO aria-label and NO data-testid at all — only visible
-    // text ("add\nNew project", the "add" being a Material icon
-    // ligature). The old aria-label-based selectors never matched
-    // anything real; findByVisibleText is the actual primary path now,
-    // CSS candidates kept only as a cheap first try in case a future
-    // redesign adds a real attribute.
-    try {
-      let btn = null;
-      for (const sel of SEL.newProjectButton) {
-        try {
-          btn = document.querySelector(sel);
-        } catch (_) { /* ignore invalid selector */ }
-        if (btn) break;
-      }
-      if (!btn) btn = FA_UTILS.findByVisibleText('button, a', NEW_PROJECT_TEXT_PATTERNS);
-      if (btn) {
-        btn.click();
-        await FA_UTILS.randomDelay(800, 1500);
-      }
-    } catch (_) {
-      // not present — assume we're already in a project context
+    const startingUrl = location.href;
+    let btn = null;
+    for (const sel of SEL.newProjectButton) {
+      try {
+        btn = document.querySelector(sel);
+      } catch (_) { /* ignore invalid selector */ }
+      if (btn) break;
     }
+    if (!btn) btn = FA_UTILS.findByVisibleText('button, a', NEW_PROJECT_TEXT_PATTERNS);
+
+    if (!btn) {
+      // No "New project" affordance at all — per real confirmed
+      // behavior, this is expected when Flow already navigated
+      // directly into a project. Verify that instead of assuming it.
+      if (PROJECT_URL_RE.test(location.href)) return;
+      throw new FASelectorError({
+        step: STEP,
+        description:
+          'ปุ่ม "New project" (ไม่เจอปุ่มเลย และ URL ปัจจุบันก็ไม่ใช่ project URL จริง — ไม่แน่ใจว่ากำลังอยู่ใน project ที่ถูกต้องหรือไม่)',
+        selectorsTried: [...SEL.newProjectButton, `<text match: ${NEW_PROJECT_TEXT_PATTERNS.join(', ')}>`],
+        siteHint: `URL ปัจจุบัน: ${location.href} — ตรวจ DOM จริงผ่าน DevTools ว่าอยู่ในสถานะไหนกันแน่`,
+      });
+    }
+
+    btn.click();
+
+    // Required verification, not a fixed blind delay: poll for the URL
+    // to actually change to a real, different project URL before
+    // proceeding.
+    const start = Date.now();
+    const timeoutMs = 15000;
+    while (Date.now() - start < timeoutMs) {
+      if (PROJECT_URL_RE.test(location.href) && location.href !== startingUrl) return;
+      await FA_UTILS.sleep(250);
+    }
+    throw new FATimeoutError({
+      step: STEP,
+      description: `กด "New project" แล้วรอ URL เปลี่ยนเป็น project ใหม่จริง (URL ปัจจุบันยังเป็น: ${location.href}) — อาจสร้าง project ไม่สำเร็จ`,
+      timeoutMs,
+    });
   }
 
   // CONFIRMED live 2026-09-14 (2nd round): no <input type="file"> exists
@@ -172,6 +216,41 @@
     const file = FA_UTILS.dataUrlToFile(storyboardImageDataUrl, 'storyboard.png');
     await FA_UTILS.attachFileToInput(fileInput, file);
     await FA_UTILS.randomDelay(800, 1600);
+
+    // Real gap found live 2026-09-15 (see README "v44"), reported by
+    // Toey from real hands-on use on a slower machine/network than
+    // aree-home's: the fixed 800-1600ms delay above only waits for the
+    // asset picker to *open*, not for the uploaded image's own
+    // thumbnail to actually finish loading inside it. On a slower
+    // connection the "Add to prompt" click below could fire while the
+    // thumbnail is still mid-load, and Flow silently commits nothing —
+    // same class of silent-wrong-success this project exists to catch
+    // (see the "Add to prompt" comment further down). Fixed by reusing
+    // newImagesSince() — already defined above and already proven
+    // reliable as post-click evidence for findPromptField() — as a
+    // REQUIRED pre-click gate instead: poll until a genuinely new,
+    // visible, fully-loaded (img.complete && naturalWidth > 100) image
+    // actually appears, and only then proceed to search for/click
+    // "Add to prompt". No live re-verification was done for this exact
+    // gate this round (code-reading/design only, per Aree's request) —
+    // it reuses the same detection logic already live-confirmed
+    // elsewhere in this file rather than guessing new DOM structure.
+    let loadedImgs = [];
+    const imageLoadStart = Date.now();
+    const IMAGE_LOAD_TIMEOUT_MS = 20000;
+    while (!loadedImgs.length && Date.now() - imageLoadStart < IMAGE_LOAD_TIMEOUT_MS) {
+      loadedImgs = newImagesSince(imagesBeforeUpload);
+      if (!loadedImgs.length) await FA_UTILS.sleep(300);
+    }
+    if (!loadedImgs.length) {
+      throw new FASelectorError({
+        step: STEP,
+        description:
+          'รูป storyboard ที่อัปโหลดยังโหลดไม่เสร็จ (ไม่เจอ thumbnail ใหม่ที่โหลดสมบูรณ์ใน asset picker ภายใน 20 วิ) — ไม่กด "Add to prompt" ก่อนรูปพร้อมจริง',
+        selectorsTried: ['img (visible, complete, naturalWidth>100 — ใหม่หลังอัปโหลด)'],
+        siteHint: 'เครื่อง/เน็ตอาจช้ากว่าที่คาด ลองเพิ่ม IMAGE_LOAD_TIMEOUT_MS ใน uploadStoryboardImage() ถ้ายังเจอซ้ำ',
+      });
+    }
 
     // Real gap found live 2026-09-15 (see README "v25"): missing
     // entirely, not wrong — feeding the file into fileInput above only

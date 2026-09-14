@@ -13,6 +13,59 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v44: 🐛 2 real reliability gaps on Google Flow — silent-assume new-project + premature "Add to prompt"
+
+Toey reported two flaky-in-practice issues from real hands-on testing on
+a machine/network slower than aree-home's (observational, no detailed
+repro steps or error logs available) — both matching residual risks QA
+had already flagged earlier in this project:
+
+**1. `ensureNewProject()` intermittently fails to actually land in a new
+project.** Read the shipped code: the entire click-and-verify logic was
+wrapped in one blanket `try/catch` that silently swallowed *any*
+failure, followed only by a fixed 800-1500ms delay — no check that a
+new project genuinely exists afterward. The "no button found" path's
+comment literally said "assume we're already in a project context"
+without ever checking that assumption. This directly threatens
+`openVideoAssetFromPicker()`'s (v33/v34) "at most one video per fresh
+project" invariant if it ever silently lands in a stale/reused project.
+
+**Fixed**: replaced the silent-assume logic with verify-then-fail-loud,
+using the real project URL shape (`flow.google.com/project/<uuid>`)
+confirmed live earlier in this project as the concrete signal. If no
+"New project" button is found, the current URL must already match that
+pattern or it throws `FASelectorError` instead of assuming. If the
+button is found and clicked, it polls up to 15s for `location.href` to
+actually change to a different, matching project URL before returning,
+throwing `FATimeoutError` otherwise.
+
+**2. `uploadStoryboardImage()`'s "Add to prompt" click could fire before
+the uploaded image thumbnail finished loading**, especially on a
+slower connection — the only wait between `attachFileToInput()` and
+searching for the "Add to prompt" button was a fixed 800-1600ms delay,
+with the subsequent up-to-10s poll only checking that the *button*
+existed, never that the image itself had rendered.
+
+**Fixed**: added a required pre-click gate reusing `newImagesSince()` /
+`snapshotImages()` — already-live-confirmed evidence machinery this
+same function already uses *after* the click for `findPromptField()` —
+polling up to 20s for a genuinely new, visible, fully-loaded
+(`img.complete && naturalWidth > 100`) thumbnail to appear before
+proceeding to search for/click "Add to prompt" at all. Throws
+`FASelectorError` if no such image shows up in time, instead of
+clicking on an unconfirmed guess.
+
+**Not live-tested this round**: this was code-reading + design only,
+per Aree's explicit request to assess plausibility and propose fixes
+from the current code — no VNC/live DOM access was used. Both fixes
+reuse signals already confirmed live earlier in this project
+(the `/project/<uuid>` URL shape; the `newImagesSince()` detection
+logic) rather than guessing new DOM structure, and both fail loudly
+with a labeled error instead of silently proceeding on an unverified
+guess if the underlying assumption turns out wrong. Verified via
+`node --check` only. Flagged as the natural next verification step:
+a real end-to-end run on the slower machine Toey actually saw this on.
+
 ## v43: 🐛 real parseAnalysisResponse bug — a stray mid-sentence mention hijacked the split
 
 Toey tested a new product (ATHENA sleeveless athletic shirt) with a
