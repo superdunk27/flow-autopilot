@@ -13,6 +13,54 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v33: 🎉 video mode confirmed working end to end — last gap was navigation, not a selector
+
+Toey's final live test with Old Spice Wolfthorn: `setVideoGenerationMode()`
+(v30–v32) worked exactly right — the composer showed "Video · 720p ·
+10s x1" automatically, no manual intervention, and the generated asset
+was genuinely `type: Video` this time, not `Image`. The one remaining
+error was the same old `resultVideo` `FASelectorError` — but this time
+for a real, different reason.
+
+Aree checked the real DOM: `document.querySelectorAll('video')`
+returns 0 right after generation finishes, on the main "All media"
+view — **`SEL.resultVideo` was never actually wrong** (Aree confirmed
+via DevTools that the real mounted element matches `video[src]`
+exactly: `<video ... aria-label="Video preview" class="video-preview"
+src="https://flow-content.google/...">`). Flow simply doesn't
+auto-navigate to a video-player view after generation — the `<video>`
+element only mounts once the specific asset is actually opened, which
+Aree did manually by opening the asset picker ("+") and clicking the
+new video asset in its list.
+
+**Fixed**: new `openNewestVideoAsset()` in `content-flow.js`, called
+right after `waitForGenerationComplete()` and before `waitFor(SEL.resultVideo, ...)`
+— opens the asset picker via the same confirmed `SEL.uploadDropzone`
+button already used for uploading, clicks the "Videos" filter tab
+(text-matched, confirmed to exist from this session's own earlier live
+exploration of the picker's filter tabs), then clicks a thumbnail to
+open the asset. Deliberately does **not** need the snapshot-diffing
+technique from `findPromptField()`/`findVideoToggle()` (v27/v32):
+since `ensureNewProject()` starts a genuinely fresh project every run,
+there is at most **one** video asset in the whole project by the time
+generation finishes — filtering to "Videos" is unambiguous on its own,
+with no possible decoy to disambiguate against.
+
+**Honest limit, flagged rather than glossed over**: the asset
+picker's own item-row markup (what's actually clickable) has **not**
+been confirmed live. Best-effort fallback: click any visible `<img>`
+thumbnail inside the picker after filtering — clicking an `<img>`
+bubbles the click event up through its ancestors regardless of
+exactly which one owns the real click handler, so this should trigger
+the row's click without needing to know the row's own selector (plain
+DOM event bubbling — unrelated to the `interestfor`-gated trusted-input
+requirement found on the ChatGPT side).
+
+**Not live-tested this round**: verified via `node --check` only. If
+this specific thumbnail-click guess doesn't land on the right row live,
+the next report should include the real asset-row markup so this can
+be tightened the same way `findPromptField()`/`addToPromptButton` were.
+
 ## v32: scoped the Video-toggle search to the panel that just opened, not the whole document
 
 QA reviewed 21c85d5+853eb24 before Toey's final live generate and

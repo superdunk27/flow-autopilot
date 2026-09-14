@@ -577,13 +577,81 @@
     generateBtn.click();
   }
 
-  async function waitForVideo() {
+  /**
+   * Real gap found live 2026-09-15 (see README "v33") — SEL.resultVideo
+   * was never actually wrong (confirmed by Toey via DevTools: the real
+   * mounted element matches `video[src]` exactly). The real problem is
+   * that Flow does not auto-navigate to a video-player view after
+   * generation finishes — `document.querySelectorAll('video')` returned
+   * 0 immediately after generation completed, on the main "All media"
+   * view. The `<video>` element only mounts once the specific video
+   * asset is actually opened from the asset picker (confirmed live:
+   * clicking into it there showed a real `<video aria-label="Video
+   * preview" class="video-preview" src="https://flow-content.google/...">`).
+   *
+   * Since ensureNewProject() starts a genuinely fresh project on every
+   * run, there is at most ONE video asset in the whole project by the
+   * time generation finishes — filtering the asset picker to "Videos"
+   * is unambiguous here, unlike findPromptField()/findVideoToggle()
+   * (v27/v32) which needed snapshot-diffing against real decoys
+   * elsewhere on the page. No such decoy is possible for "the one
+   * video in a fresh project," so this doesn't need that technique.
+   *
+   * Honest limit: the asset picker's own item-row markup (what's
+   * actually clickable — a specific class/tag) has NOT been confirmed
+   * live. Best-effort fallback: click any visible `<img>` thumbnail
+   * inside the picker after filtering to "Videos" — clicking an `<img>`
+   * bubbles the click event up through its ancestors regardless of
+   * exactly which one owns the real click handler, so this should
+   * trigger the row's own click without needing to know the row's own
+   * selector (this is ordinary DOM event bubbling, not the
+   * `interestfor`-gated trusted-input requirement found on the ChatGPT
+   * side — unrelated mechanisms).
+   */
+  async function openNewestVideoAsset(warnings) {
+    const dropzoneBtn = await FA_UTILS.waitFor(SEL.uploadDropzone, {
+      step: STEP,
+      description: 'ปุ่มเปิด asset picker (เพื่อเปิดวิดีโอที่ generate เสร็จแล้ว)',
+    });
+    dropzoneBtn.click();
+    await FA_UTILS.randomDelay(500, 1000);
+
+    const videosTab = FA_UTILS.findByVisibleText('button, div, span', [/^videos$/i]);
+    if (videosTab) {
+      videosTab.click();
+      await FA_UTILS.randomDelay(400, 800);
+    } else {
+      warnings.push('⚠️ ไม่เจอแท็บ "Videos" ใน asset picker — ข้ามการกรอง อาจเจอ asset อื่นที่ไม่ใช่วิดีโอปนอยู่ โปรดตรวจผลลัพธ์');
+    }
+
+    let thumbnail = null;
+    const start = Date.now();
+    while (!thumbnail && Date.now() - start < 8000) {
+      thumbnail = Array.from(document.querySelectorAll('img')).find(
+        (img) => FA_UTILS.isReallyVisible(img) && img.naturalWidth > 20
+      );
+      if (!thumbnail) await FA_UTILS.sleep(250);
+    }
+    if (!thumbnail) {
+      throw new FASelectorError({
+        step: STEP,
+        description: 'thumbnail ของวิดีโอใน asset picker (เพื่อเปิดดูวิดีโอที่ generate เสร็จแล้ว)',
+        selectorsTried: ['img (ตัวแรกที่ visible ใน asset picker หลัง filter เป็น Videos)'],
+        siteHint: 'ยังไม่ยืนยัน DOM ของ asset list item สด — ตรวจผ่าน DevTools แล้วปรับ openNewestVideoAsset() ใน content-flow.js',
+      });
+    }
+    thumbnail.click();
+    await FA_UTILS.randomDelay(600, 1200);
+  }
+
+  async function waitForVideo(warnings) {
     await FA_UTILS.waitForGenerationComplete(SEL.generatingIndicator, {
       step: STEP,
       description: 'Veo กำลังสร้างวิดีโอ',
       // Video generation is slower than a chat reply — give it more room.
       timeoutMs: 10 * 60 * 1000,
     });
+    await openNewestVideoAsset(warnings);
     const videoEl = await FA_UTILS.waitFor(SEL.resultVideo, {
       step: STEP,
       description: 'วิดีโอผลลัพธ์',
@@ -605,7 +673,7 @@
     await ensureNewProject();
     const evidenceImgs = await uploadStoryboardImage(payload.storyboardImageDataUrl, warnings);
     await submitVideoPrompt(payload.videoPrompt, warnings, evidenceImgs);
-    const result = await waitForVideo();
+    const result = await waitForVideo(warnings);
     await sendStepDone({
       type: FA_MSG.STEP_DONE,
       step: STEP,
