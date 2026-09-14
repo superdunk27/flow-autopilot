@@ -13,6 +13,66 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v13: possible unifying root cause — MV3 service-worker idle-termination, no keepalive
+
+Aree checked `chrome://extensions` directly during a stuck run (analyze
+step failing to attach, both a 2.6MB and — critically — a 179KB image
+that should have been well within margin) and found the **service
+worker itself showing (Inactive)** while the run was still stuck at
+"running". Real, direct, live evidence — not a theory — and it
+potentially reframes several of today's earlier fixes (v11's silent
+gap, v12's send-button hang) as symptoms of one deeper cause rather than
+independent bugs, since a terminated MV3 service worker destroys its
+entire JS execution state, including any in-flight `try/catch` → `fail()`
+safety net.
+
+Confirmed by reading the code (not assumed): `manifest.json` declared no
+`alarms` permission and `background.js` had zero keepalive mechanism.
+The long waits during a step (`withCeiling`'s `setTimeout` ceiling timer,
+and the pending `chrome.tabs.sendMessage()` response it races against)
+sit in `startAnalyzeStep()`/etc. for up to 8–12 minutes doing *no*
+further Chrome-extension-API activity — exactly the condition MV3's
+~30s SW idle-termination targets. If the SW dies mid-step: the
+`withCeiling` `setTimeout` (a bare timer, explicitly *not* one of the
+mechanisms Chrome guarantees survives SW termination) may simply never
+fire; the entire `startAnalyzeStep()` closure and its `catch → fail()`
+are destroyed with it — the very safety net documented as guaranteeing
+"a step always eventually reaches a terminal status" (see `withCeiling`'s
+own doc comment) is itself vulnerable to exactly what it exists to
+catch. A step can go fully silent this way with nothing actually broken
+in the selector/timing logic that's been the focus of v9–v12.
+
+This does not retroactively prove v9–v12's fixes were unnecessary — each
+of those was independently reasoned from its own evidence (v9's DOM-
+confirmed `checkVisibility` fix in particular) — but it is a real
+category of failure those fixes could never have addressed, since none
+of them touch service-worker lifetime at all.
+
+**Fixed**: added `alarms` permission + a `chrome.alarms`-based keepalive
+(`startKeepalive()`/`stopKeepalive()`, `fa-keepalive` alarm firing every
+~24s) started at the top of each `startAnalyzeStep()`/`startImageGenStep()`/
+`startFlowStep()` and stopped in a `finally` block, so the SW receives a
+Chrome-extension-API event well under the ~30s idle threshold for the
+entire duration of a step — `chrome.alarms` specifically (not a bare
+`setInterval`) because regular timers are the *unreliable* mechanism in
+a service worker per Chrome's own docs; alarms are the documented
+exception. The `onAlarm` listener itself does nothing but log — merely
+being a registered listener that fires is what resets the idle clock.
+
+**Explicit caveats, not glossed over**: (1) Chrome clamps
+`periodInMinutes` to a 1-minute floor for packaged/Web-Store extensions;
+this project is currently unpacked/dev-only, where sub-1-minute alarms
+are commonly permitted, but that specific clamping behavior has **not**
+been live-confirmed on this Chrome build — if the next live test still
+shows the SW going Inactive mid-run, the alarm period is the first
+thing to check via the SW's own `console.debug` keepalive-tick log,
+with a persistent `chrome.runtime.connect()` port + periodic ping as the
+fallback (no minimum-period ambiguity there). (2) This is a plausible,
+evidence-informed fix for a real, confirmed gap — not a DOM-verified
+root cause the way v9 was. **Not live-tested this round** — no live
+access for dev this time; verified via `node --check` + JSON validation
+only.
+
 ## v12: fixed the send-button wait — self-healing against a stale re-render, plus progress granularity
 
 Aree ran a live test directly via noVNC (new workflow — Aree now tests

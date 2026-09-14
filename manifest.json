@@ -3,7 +3,7 @@
   "name": "Flow Autopilot",
   "version": "0.1.0",
   "description": "Automate ChatGPT product analysis -> ChatGPT image-gen storyboard -> Google Flow (Veo) video, using your own logged-in browser sessions. 100% client-side, no server, no shared credentials.",
-  "permissions": ["storage", "notifications"],
+  "permissions": ["storage", "notifications", "alarms"],
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://flow.google.com/*"

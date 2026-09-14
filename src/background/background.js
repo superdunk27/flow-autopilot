@@ -86,6 +86,61 @@ function withCeiling(promise, ms, description) {
   return Promise.race([promise, ceiling]).finally(() => clearTimeout(timer));
 }
 
+// ---- MV3 service-worker keepalive ---------------------------------------
+
+// Real bug found live 2026-09-15 (see README "v13"): chrome://extensions
+// showed this service worker as (Inactive) *while a run was still stuck
+// "running"* — confirmed directly, not theorized. MV3 terminates an idle
+// SW after ~30s of no extension-API activity, and does so unconditionally
+// (a pending chrome.tabs.sendMessage() response and even the withCeiling
+// setTimeout below are NOT a reliable exemption — this is a well-known
+// MV3 platform gap, not specific to this extension). When that happens
+// mid-step, the *entire* startAnalyzeStep/etc. call stack — including its
+// own try/catch → fail() safety net — is destroyed with it: the very
+// mechanism built to guarantee "a step always eventually reaches a
+// terminal status" (see withCeiling's doc comment) is itself vulnerable
+// to exactly what it was built to catch. A step can go fully silent this
+// way even though nothing in background.js or content-chatgpt.js is
+// actually broken.
+//
+// Standard fix: a recurring chrome.alarms alarm while a step is in
+// flight. Any extension API event (an alarm firing included) resets the
+// 30s idle countdown, so firing well under that threshold keeps the SW
+// alive for the whole step without needing to resume any destroyed
+// state — chrome.alarms is used (not a bare setTimeout/setInterval)
+// specifically because those are the *unreliable* ones in a service
+// worker per Chrome's own docs; alarms are the documented exception.
+//
+// Caveat, flagged honestly rather than assumed: Chrome clamps
+// periodInMinutes to a 1-minute floor for packaged/Web-Store extensions;
+// this project is currently unpacked/dev-only (see README "Install"),
+// where sub-1-minute alarms are commonly permitted, but that has not
+// been live-confirmed in this Chrome build. If live testing shows the
+// alarm is silently clamped to 1 minute (too coarse vs. the ~30s idle
+// window), the next fallback is a persistent chrome.runtime.connect()
+// port with periodic pings instead, which has no such minimum-period
+// ambiguity.
+const KEEPALIVE_ALARM_NAME = 'fa-keepalive';
+const KEEPALIVE_PERIOD_MINUTES = 0.4; // ~24s, under the ~30s idle threshold
+
+function startKeepalive() {
+  chrome.alarms.create(KEEPALIVE_ALARM_NAME, { periodInMinutes: KEEPALIVE_PERIOD_MINUTES });
+}
+
+function stopKeepalive() {
+  chrome.alarms.clear(KEEPALIVE_ALARM_NAME);
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== KEEPALIVE_ALARM_NAME) return;
+  // No-op besides this console line — merely being a registered listener
+  // that fires is what resets the SW's idle timer. Logged (not silent)
+  // so a future live session can directly confirm from the SW's own
+  // console whether keepalive ticks were actually still firing during a
+  // stuck run, instead of having to assume it worked.
+  console.debug('[Flow Autopilot] keepalive tick', new Date().toISOString());
+});
+
 // ---- pipeline steps -------------------------------------------------------
 
 // Ceilings comfortably above each step's own internal timeouts (5 min
@@ -111,6 +166,7 @@ async function startAnalyzeStep(productImageDataUrl) {
     warnings: [],
     progressLabel: null,
   });
+  startKeepalive();
   try {
     await withCeiling(
       sendMessageWithRetry(tabId, {
@@ -127,6 +183,8 @@ async function startAnalyzeStep(productImageDataUrl) {
     );
   } catch (err) {
     await fail(FA_STEPS.ANALYZE, err.message);
+  } finally {
+    stopKeepalive();
   }
 }
 
@@ -141,6 +199,7 @@ async function startImageGenStep(storyboardPrompt) {
     error: null,
     progressLabel: null,
   });
+  startKeepalive();
   try {
     await withCeiling(
       sendMessageWithRetry(tabId, {
@@ -157,6 +216,8 @@ async function startImageGenStep(storyboardPrompt) {
     );
   } catch (err) {
     await fail(FA_STEPS.IMAGEGEN, err.message);
+  } finally {
+    stopKeepalive();
   }
 }
 
@@ -171,6 +232,7 @@ async function startFlowStep(videoPrompt) {
     error: null,
     progressLabel: null,
   });
+  startKeepalive();
   try {
     await withCeiling(
       sendMessageWithRetry(tabId, {
@@ -185,6 +247,8 @@ async function startFlowStep(videoPrompt) {
     );
   } catch (err) {
     await fail(FA_STEPS.FLOW, err.message);
+  } finally {
+    stopKeepalive();
   }
 }
 
