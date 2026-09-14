@@ -13,6 +13,75 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v12: fixed the send-button wait — self-healing against a stale re-render, plus progress granularity
+
+Aree ran a live test directly via noVNC (new workflow — Aree now tests
+each round, no longer waiting on Toey every time), using a realistic
+2.6MB product photo instead of the 3KB test image earlier fixes were
+verified against. Result: analyze step got all the way through opening
+the chat tab, attaching the image (real thumbnail visible), and typing
+the full template (visible in the composer) — then **stopped there**.
+30+ seconds with no further action and no error, violating the
+anti-silent-fail principle. The extension's own popup (progress
+reporting from v11 working as intended) showed it stuck at
+`[analyze] กำลังพิมพ์ข้อความ…`, never advancing. Aree also observed the
+visible Send button looked enabled (dark blue, not greyed) the whole
+time it was stuck.
+
+Read the whole `attachAndSend()` tail (after typing, before
+`sendBtn.click()`) end to end. No infinite loop exists in that stretch
+by code reading — `waitFor(SEL.sendButton)` (20s default) and
+`waitForEnabled(sendBtn, {timeoutMs: 30000})` are both flat-bounded and
+would eventually throw, which should surface via the same
+`STEP_DONE ok:false` → `fail()` path verified in v11. So **not a proven
+infinite hang** — two real things found instead, and both fixed:
+
+1. **A real stale-reference risk, not yet proven as this incident's
+   cause**: `sendBtn` was captured once via `waitFor()`, then polled in
+   place by `waitForEnabled()`. chatgpt.com is React-based; if its
+   composer toolbar re-renders while a large image's upload pipeline is
+   still settling (the same class of "page re-rendered mid-wait" case
+   `waitForPageReady()` already had to handle for the composer/`+`
+   button — see v8), and that re-render *replaces* the send button node
+   rather than mutating it, the captured reference goes stale/detached.
+   A detached node's `disabled` state is frozen at whatever it was the
+   instant it was orphaned — it can never become "enabled" again no
+   matter what the live button on screen shows. That matches every
+   observed symptom (visibly enabled button, code never proceeding)
+   exactly, but there was no way to confirm it from a live DOM snapshot
+   this round (Aree tested solo this time, no live DOM access granted to
+   dev for this round).
+2. **A real observability gap, confirmed by code reading**: this
+   stretch of `attachAndSend()` had zero progress-label granularity
+   between "typing" and "sent" — up to its full combined ~50s budget
+   (20s send-button lookup + 30s enabled-wait) could elapse with the
+   popup showing the exact same static label the whole time. Aree's
+   30+s observation window plausibly wasn't long enough to reach that
+   combined ceiling, which — with no intermediate feedback — is
+   indistinguishable from a true hang. Same failure class v11 already
+   fixed elsewhere in this file, just not yet covered at this spot.
+
+Fixed both in one change, `waitForSendButtonReady(step)`: replaces the
+old capture-once-then-poll pattern with a loop that re-checks
+`document.contains(btn)` on every poll tick and re-locates the button
+fresh if it was detached (self-healing, same pattern already
+established for the composer/`+`-button re-render case), reports
+progress at 3 new checkpoints (button lookup started, detached &
+re-locating, button ready), widens the combined budget to a flat 45s to
+give a large real photo more margin (consistent with v10's precedent of
+widening `attachProductImage()` for the same 3KB-vs-real-photo gap), and
+— if it still genuinely times out — includes the button's actual live
+`disabled`/`aria-disabled` values in the thrown error, so a future
+report carries hard evidence instead of a generic timeout message.
+
+**Not live-verified this round** — no live DOM/account access for dev
+this time (Aree is testing directly now); confirmed only via careful
+reading of the full call chain and a plain `node --check` syntax pass.
+Aree's next live run will show directly (via the new checkpoint labels)
+whether this was actually the stale-reference case, or just the timing
+gap, or something else still — flagged as an open question, not a
+confirmed fix, unlike v9's DOM-verified case.
+
 ## v11: closed a real silent-fail gap + live progress reporting
 
 Toey's next test hit the worst version of this yet: **no error at all**

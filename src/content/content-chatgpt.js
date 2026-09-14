@@ -273,6 +273,65 @@
     }
   }
 
+  /**
+   * Waits for the send button to become enabled, self-healing against a
+   * real class of bug already precedented in waitForPageReady (see
+   * above): chatgpt.com is React-based, and a large real photo (2.6MB,
+   * vs. the 3KB test image v7/v8 were verified against) plausibly keeps
+   * the composer toolbar re-rendering for longer while its own upload
+   * pipeline settles. If that re-render *replaces* the send button DOM
+   * node (rather than mutating it in place), a reference captured
+   * earlier goes stale/detached — its disabled state frozen at whatever
+   * it was the instant before removal, which can never change again no
+   * matter what the user sees on screen. Polling a detached node against
+   * waitForEnabled's flat 30s budget looks and behaves exactly like a
+   * silent hang: the on-screen button is genuinely enabled (blue, not
+   * grey — matching what was reported live 2026-09-14) while the code
+   * waits on a dead copy of it that will never update.
+   *
+   * Not proven to be *the* cause of that report — no infinite loop was
+   * found by reading waitForEnabled itself (see README), so the
+   * observed 30+s of nothing is also plausibly this whole section's
+   * combined worst-case budget (up to ~50s across the sendButton lookup
+   * + this wait) with zero progress-label granularity in between, which
+   * looks identical to a hang from the outside. This fixes the real gap
+   * either way: detects detachment instead of polling a dead node
+   * (turns a guaranteed-eventual generic timeout into an immediate,
+   * self-healing re-locate), and reports progress at each sub-step so
+   * the next real test can tell which one is actually slow.
+   */
+  async function waitForSendButtonReady(step) {
+    const SEND_READY_TIMEOUT_MS = 45000;
+    const POLL_MS = 250;
+    const start = Date.now();
+    let btn = await FA_UTILS.waitFor(SEL.sendButton, {
+      step,
+      description: 'ปุ่มส่งข้อความ (send)',
+    });
+    reportProgress(`[${step}] พิมพ์ข้อความเสร็จแล้ว กำลังรอปุ่มส่งพร้อมใช้งาน…`);
+    for (;;) {
+      if (!document.contains(btn)) {
+        reportProgress(`[${step}] ปุ่มส่งถูกแทนที่ระหว่างรอ (หน้าเว็บ re-render) — หาปุ่มใหม่…`);
+        btn = await FA_UTILS.waitFor(SEL.sendButton, {
+          step,
+          description: 'ปุ่มส่งข้อความ (send) — หาใหม่หลัง re-render',
+        });
+        continue;
+      }
+      if (FA_UTILS.isEnabled(btn)) return btn;
+      if (Date.now() - start > SEND_READY_TIMEOUT_MS) {
+        throw new FATimeoutError({
+          step,
+          description:
+            `ปุ่มส่ง (รอจนกดได้ — สถานะล่าสุดของปุ่มจริงในหน้าเว็บ: ` +
+            `disabled=${btn.disabled}, aria-disabled=${btn.getAttribute('aria-disabled')})`,
+          timeoutMs: SEND_READY_TIMEOUT_MS,
+        });
+      }
+      await FA_UTILS.sleep(POLL_MS);
+    }
+  }
+
   async function attachAndSend({ step, mode, productImageDataUrl, promptText, warnings }) {
     await waitForPageReady(step);
 
@@ -291,15 +350,8 @@
     FA_UTILS.typeIntoComposer(composer, promptText);
     await FA_UTILS.randomDelay(400, 900);
 
-    const sendBtn = await FA_UTILS.waitFor(SEL.sendButton, {
-      step,
-      description: 'ปุ่มส่งข้อความ (send)',
-    });
-    await FA_UTILS.waitForEnabled(sendBtn, {
-      step,
-      description: 'ปุ่มส่ง (รอจนกดได้ — แต่ปุ่ม enabled ไม่ได้แปลว่ามีไฟล์แนบอยู่จริง เช็คแยกด้านล่างอีกที)',
-      timeoutMs: 30000,
-    });
+    const sendBtn = await waitForSendButtonReady(step);
+    reportProgress(`[${step}] ปุ่มส่งพร้อมแล้ว กำลังตรวจสอบไฟล์แนบครั้งสุดท้ายก่อนส่ง…`);
 
     // Final re-check right before sending: the attachment chip found
     // above could in principle have been removed between then and now
