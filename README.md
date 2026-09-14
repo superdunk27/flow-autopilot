@@ -13,6 +13,39 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v37: v7 template — stricter on-screen-text lock to stop cross-scene blending
+
+Toey generated a real video of a smartwatch (GOOJODOQ) with v6 and
+found Shot 1's on-screen text read **"สมาร์ตวอทช์ครบ จอใหญ่ 2.01" HD"**
+— a blend of wording from Shot 5's closing text ("สมาร์ตวอทช์ครบ") and
+Shot 1's own opening text ("จอใหญ่ 2.01" HD"), neither of which the
+storyboard plan actually specified for Shot 1. Not seen on earlier
+products (RUN9PRO, the stainless cutting board) — diagnosed as a known
+video-model weakness (text rendering isn't 100% stable across scene
+cuts) rather than a prompt bug, but Toey asked for one more
+reinforcement attempt before accepting it as a hard limitation.
+
+Single-sentence replacement in Section 3, verified via a Python diff
+against the exact old/new sentence pair the spec gave (rather than a
+full fenced block this time, since only one sentence changed): the old
+"Do not redraw or regenerate any text overlay — keep all on-screen
+text completely static..." sentence is replaced with a much stricter
+CRITICAL on-screen-text-lock directive — character-for-character match
+to that scene's own text only, zero cross-scene blending/merging,
+treated as a static pre-rendered graphic layer copied verbatim from
+the storyboard image. Copied verbatim from `ψ/active/flow-autopilot-extension.md`
+"Update 2026-09-14 v7", same discipline as v2–v6.
+
+Every other sentence — Sections 1, 2, and the rest of Section 3 —
+confirmed byte-identical to v6 via the same diff (only the targeted
+sentence differs, checked programmatically, not eyeballed). All 3
+section headings unchanged — no parse-code impact, same reasoning
+already established in v5/v6.
+
+**Not live-tested this round**: `node --check` confirms the file
+parses; the real test is the next live video generation with a
+product that previously showed this cross-scene text blend.
+
 ## v36: v6 template — cap voice-over lines to ~2 seconds of speech
 
 Toey generated real output through v5 by hand directly in Flow's UI

@@ -56,23 +56,30 @@
   };
 
   // Verbatim from ψ/active/flow-autopilot-extension.md "Update 2026-09-14
-  // v6 — จำกัดความยาวบท voice-over ต่อ shot ให้พูดจบใน ~2 วิ". Do not
-  // paraphrase — confirmed byte-for-byte against the spec's fenced block
-  // via a Python diff (same discipline as v2-v5). Single-sentence change
-  // from v5 (verified via diff — only this one addition, nothing else
-  // moved): Toey generated real output through v5 by hand directly in
-  // Flow's UI (not through this extension) and got no spoken narration
-  // at all — the voice-over lines ChatGPT wrote (e.g. a real one seen:
-  // "ใครกำลังหาเขียงสไตล์มินิมอล ตัวนี้เป็นเขียงสแตนเลส 316 ที่ใช้งานได้
-  // ทั้งสองด้านครับ") were full sentences too long to be spoken within
-  // the 2-second scene each one has to fit into — Omni 1.1 Flash likely
-  // dropped the narration entirely rather than attempt to cram a long
-  // sentence into a short scene. v6 appends one sentence to Section 1's
-  // voice-over instruction: keep each line short enough for ~2 seconds
-  // (roughly 4-7 Thai syllables, a phrase not a full sentence). All 3
-  // section headings and everything else are byte-identical to v5 —
-  // parseAnalysisResponse's section-level-only parsing (see v5's own
-  // note above) is unaffected.
+  // v7 — เข้มกฎล็อกตัวหนังสือ ไม่ให้ blend ข้ามช็อต". Do not paraphrase —
+  // confirmed byte-for-byte against the spec source via a Python diff
+  // (same discipline as v2-v6, this time diffing the exact old/new
+  // sentence pair the spec gave rather than a full fenced block, since
+  // v7 only replaces one sentence in Section 3). Toey generated a real
+  // video of a smartwatch (GOOJODOQ) with v6 and found Shot 1's
+  // on-screen text read "สมาร์ตวอทช์ครบ จอใหญ่ 2.01" HD" — a blend of
+  // wording from Shot 5's closing text ("สมาร์ตวอทช์ครบ") and Shot 1's
+  // own opening text ("จอใหญ่ 2.01" HD"), neither of which the
+  // storyboard plan actually specified for Shot 1. Not seen on earlier
+  // products (RUN9PRO, the stainless cutting board) — diagnosed as a
+  // known video-model weakness (text rendering isn't 100% stable across
+  // scene cuts) rather than a prompt bug, but Toey asked for one more
+  // reinforcement attempt before accepting it as a hard limitation.
+  // Replaces Section 3's old "Do not redraw or regenerate any text
+  // overlay — keep all on-screen text completely static..." sentence
+  // with a much stricter CRITICAL on-screen-text-lock directive
+  // (character-for-character match to that scene's own text only, zero
+  // cross-scene blending, treated as a static pre-rendered graphic
+  // layer). Every other sentence in the template — Sections 1, 2, and
+  // the rest of Section 3 — confirmed byte-identical to v6 via the same
+  // diff. All 3 section headings unchanged — parseAnalysisResponse's
+  // section-level-only parsing (v5's own established finding) is
+  // unaffected.
   root.FA_ANALYZE_TEMPLATE = `You are a UGC-style product video storyboard assistant. When the user uploads a product photo, output exactly 3 sections in this order, plain text, no extra commentary:
 
 ## 1. Storyboard Plan (5 Shots)
@@ -95,7 +102,7 @@ A single image generation prompt (for Nano Banana / GPT Image) that produces ONE
 ## 3. Video Prompt (10 seconds, 5 scenes)
 CRITICAL: This is a strict reference-image-conditioned generation. The exact product shown in the attached storyboard image — its precise colorway, materials, logo placement, text, and silhouette — must be reproduced with photographic fidelity in every frame. Do not substitute, redesign, restyle, or generate a different product or color scheme.
 
-A single video generation prompt (compatible with Flow/Veo, Sora, or Kling) describing: animate the 5-panel storyboard image above into a 10-second video, cutting to a new scene every 2 seconds in the same order as the panels. Each scene's camera motion should match that shot's theme from the plan: the overview shot (Shot 1) and the closing shot (Shot 5) use a completely static camera with only gentle ambient motion (soft light shimmer, subtle depth breathing); the material/texture shot (Shot 2) may have a very slow, subtle push-in or pan across the surface; the design/detail shot (Shot 3) may have a slow, small rotation or angle drift; the use-occasion shot (Shot 4) should show the product naturally in its in-use context with gentle, realistic motion. Do not redraw, regenerate, or deform the product itself in any scene — the product's shape, color, logo, and materials must stay exactly as shown in the storyboard image throughout. Do not redraw or regenerate any text overlay — keep all on-screen text completely static in wording per scene, only letting it gently float, breathe, and fade with soft easing. For each scene, have a warm, natural-sounding voice narrate that shot's voice-over line from the plan above, clearly and audibly, timed to when that scene appears, with light upbeat background music underneath at a low volume that never overpowers the narration. Simple clean cuts between scenes (no fancy wipes or transitions), consistent color grade throughout, UGC minimal aesthetic maintained across all 5 scenes.
+A single video generation prompt (compatible with Flow/Veo, Sora, or Kling) describing: animate the 5-panel storyboard image above into a 10-second video, cutting to a new scene every 2 seconds in the same order as the panels. Each scene's camera motion should match that shot's theme from the plan: the overview shot (Shot 1) and the closing shot (Shot 5) use a completely static camera with only gentle ambient motion (soft light shimmer, subtle depth breathing); the material/texture shot (Shot 2) may have a very slow, subtle push-in or pan across the surface; the design/detail shot (Shot 3) may have a slow, small rotation or angle drift; the use-occasion shot (Shot 4) should show the product naturally in its in-use context with gentle, realistic motion. Do not redraw, regenerate, or deform the product itself in any scene — the product's shape, color, logo, and materials must stay exactly as shown in the storyboard image throughout. CRITICAL — on-screen text lock: each scene's on-screen text overlay must exactly match ONLY that scene's own text from the storyboard plan above, character-for-character, with zero blending, merging, or borrowing of wording from any other scene. Do not redraw, regenerate, retype, or combine text from two different panels into a single scene. Treat each scene's text as a static, pre-rendered graphic layer copied verbatim from the storyboard image — the only permitted motion is gentle floating, breathing, or fade easing already described; the wording itself must never change, drift, or merge with another scene's wording, from the first frame of that scene to the last. For each scene, have a warm, natural-sounding voice narrate that shot's voice-over line from the plan above, clearly and audibly, timed to when that scene appears, with light upbeat background music underneath at a low volume that never overpowers the narration. Simple clean cuts between scenes (no fancy wipes or transitions), consistent color grade throughout, UGC minimal aesthetic maintained across all 5 scenes.
 
 Always base shot details, themes, and demonstrated actions on the uploaded product image — a skincare bottle, a running shoe, a rice container, or any other product should each get a 5-shot plan tailored to what actually shows it off best. Keep the house style (UGC Minimal photography, Muji/Pinterest mood, soft natural light, consistent lighting and color grade, bold gradient Thai text with sparkle/heart/leaf doodles, theme-appropriate camera motion, per-shot voice narration) IDENTICAL across every product — only the setting/context choices, camera treatment per shot, on-screen text, voice-over lines, accent color, and product itself vary per shot and per product.`;
 
