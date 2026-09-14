@@ -56,33 +56,23 @@
   };
 
   // Verbatim from ψ/active/flow-autopilot-extension.md "Update 2026-09-14
-  // v5 — theme-based 5 shots (แทนสูตรฐานตายตัว) + voice-over ต่อช็อต +
-  // ล็อกสินค้าเข้ม". Do not paraphrase — confirmed byte-for-byte against
-  // the spec's fenced block via a Python diff (same discipline as
-  // v2-v4). Supersedes v4: after testing 3 products (Deo KLEAR, Old
-  // Spice, RUN9PRO), Toey noticed the same 5-pedestal set repeating for
-  // every product (v4's fixed "different base, same camera" formula) —
-  // the real reference example instead uses a different THEME per shot
-  // (with the camera angle adapting to that theme, not just the base),
-  // plus a separate per-shot voice-over column. Section 1's shot-line
-  // format changed accordingly: `Shot N: [pedestal] — [camera] —
-  // [text]` (v3/v4) -> `Shot N: [theme] — [camera treatment] —
-  // text: "[main]" / "[secondary]" — voice: "[line]"` (v5) — confirmed
-  // by reading parseAnalysisResponse below: it only ever splits by the
-  // 3 SECTION-level headings and keeps each section as one text block
-  // (storyboardPlan/storyboardPrompt/videoPrompt); it never parses
-  // individual "Shot N:" lines or extracts sub-fields from them, so
-  // this shot-line format change needed no code changes here. Section
-  // 3 gained a permanent "CRITICAL: strict reference-image-conditioned
-  // generation" directive (live-confirmed via RUN9PRO to fix a real
-  // product-mismatch problem seen with Old Spice) and per-theme camera
-  // motion (static for hero/closing, subtle push-in for macro, slow
-  // rotation for design-detail, natural motion for use-occasion)
-  // instead of v4's fully-static-every-scene rule, plus a voice
-  // directive telling Omni 1.1 Flash to narrate each shot's voice line
-  // itself — Toey decided against automating Google Flow's "Voices" tab
-  // (content-flow.js is unaffected). All 3 section headings are
-  // byte-identical to v3/v4.
+  // v6 — จำกัดความยาวบท voice-over ต่อ shot ให้พูดจบใน ~2 วิ". Do not
+  // paraphrase — confirmed byte-for-byte against the spec's fenced block
+  // via a Python diff (same discipline as v2-v5). Single-sentence change
+  // from v5 (verified via diff — only this one addition, nothing else
+  // moved): Toey generated real output through v5 by hand directly in
+  // Flow's UI (not through this extension) and got no spoken narration
+  // at all — the voice-over lines ChatGPT wrote (e.g. a real one seen:
+  // "ใครกำลังหาเขียงสไตล์มินิมอล ตัวนี้เป็นเขียงสแตนเลส 316 ที่ใช้งานได้
+  // ทั้งสองด้านครับ") were full sentences too long to be spoken within
+  // the 2-second scene each one has to fit into — Omni 1.1 Flash likely
+  // dropped the narration entirely rather than attempt to cram a long
+  // sentence into a short scene. v6 appends one sentence to Section 1's
+  // voice-over instruction: keep each line short enough for ~2 seconds
+  // (roughly 4-7 Thai syllables, a phrase not a full sentence). All 3
+  // section headings and everything else are byte-identical to v5 —
+  // parseAnalysisResponse's section-level-only parsing (see v5's own
+  // note above) is unaffected.
   root.FA_ANALYZE_TEMPLATE = `You are a UGC-style product video storyboard assistant. When the user uploads a product photo, output exactly 3 sections in this order, plain text, no extra commentary:
 
 ## 1. Storyboard Plan (5 Shots)
@@ -97,7 +87,7 @@ Use these 5 fixed themes, one per shot, in this exact order: (1) Product name an
 
 For each shot, choose the camera treatment that best sells that theme: shot 1 uses a wide hero angle showing the whole product; shot 2 uses a tight macro close-up on texture or material; shot 3 uses a design/detail angle (slight rotation or closer framing to reveal shape and details); shot 4 shows the product in an in-use or contextual setting that fits how it is actually used; shot 5 uses a clean hero angle for the closing message. Keep the overall photography STYLE consistent across all 5 shots — same lighting quality and direction, same color grade, same UGC Minimal aesthetic — even as the camera angle and framing adapt per shot's theme.
 
-Write a natural, conversational Thai voice-over line for each shot that a narrator would say out loud describing that shot's theme — this can differ in wording from the on-screen text.
+Write a natural, conversational Thai voice-over line for each shot that a narrator would say out loud describing that shot's theme — this can differ in wording from the on-screen text. Keep each voice-over line SHORT enough to be spoken naturally within about 2 seconds — roughly 4 to 7 Thai syllables, a short phrase rather than a full sentence, so it fits the 2-second scene without being cut off or rushed.
 
 ## 2. Storyboard Image Prompt
 A single image generation prompt (for Nano Banana / GPT Image) that produces ONE image containing all 5 shots arranged in a grid layout (2 columns, with the 5th panel centered alone in the final row — a 2/2/1 layout), thin white gutters between panels, slightly rounded panel corners, clean white or neutral background around the grid. Photography style: UGC Minimal aesthetic, Muji/Pinterest mood — neutral beige/white/wood tones, soft natural window light, no harsh shadows, each panel's camera angle and framing follows the plan above (hero / macro close-up / design-detail / in-use / closing hero), consistent color grade and lighting direction across all 5 panels even as the angle and framing change per panel, no clutter, no extra props beyond what each shot's theme calls for. Text/decoration style (this should be bold and eye-catching, contrasting with the minimal photography): each panel has a small circled number badge (1-5) in a two-tone gradient matching the product's accent color, thick rounded bold Thai lettering for the on-screen text overlay (not plain sans-serif) showing that shot's main text prominently with the secondary text smaller beneath it, in a color gradient that complements the background, with small sparkle/heart/leaf doodle accents floating near the text in each panel. The final (5th) panel's text should be noticeably larger/bolder than the other four, with a small arrow or heart doodle pointing toward it, as a stronger closing call-to-action.

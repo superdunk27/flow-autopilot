@@ -13,6 +13,37 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v36: v6 template — cap voice-over lines to ~2 seconds of speech
+
+Toey generated real output through v5 by hand directly in Flow's UI
+(not through this extension) and got **no spoken narration at all**.
+The voice-over lines ChatGPT wrote were full sentences (a real one
+seen: "ใครกำลังหาเขียงสไตล์มินิมอล ตัวนี้เป็นเขียงสแตนเลส 316 ที่ใช้งาน
+ได้ทั้งสองด้านครับ") too long to be spoken within the 2-second scene
+each one has to fit into — likely why Omni 1.1 Flash dropped the
+narration entirely rather than attempt to cram a long sentence into a
+short scene.
+
+Single-sentence change from v5 (verified via a Python diff — confirmed
+only this one addition, nothing else moved): appends to Section 1's
+voice-over instruction, "Keep each voice-over line SHORT enough to be
+spoken naturally within about 2 seconds — roughly 4 to 7 Thai
+syllables, a short phrase rather than a full sentence, so it fits the
+2-second scene without being cut off or rushed." Copied verbatim from
+`ψ/active/flow-autopilot-extension.md` "Update 2026-09-14 v6", same
+byte-exact discipline as v2–v5 (`in_file == spec` → `True`, 6167/6167
+chars).
+
+Everything else — all 3 headings, Sections 2/3, the rest of Section 1
+— confirmed byte-identical to v5. No parse-code impact: v5's own note
+already established `parseAnalysisResponse()` only operates at the
+section-heading level, unaffected by any wording change within a
+section's body.
+
+**Not live-tested this round**: `node --check` confirms the file
+parses; the real test is whether the next live analyze+imagegen+video
+run actually produces audible narration this time.
+
 ## v35: v5 template — theme-based shots, per-shot voice-over, strict product-lock directive
 
 After testing 3 products (Deo KLEAR, Old Spice, RUN9PRO), Toey noticed
