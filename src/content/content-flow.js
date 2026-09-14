@@ -597,6 +597,17 @@
    * elsewhere on the page. No such decoy is possible for "the one
    * video in a fresh project," so this doesn't need that technique.
    *
+   * Named for what it actually does, not what it might sound like —
+   * QA caught (2026-09-15, see README "v34") that the original name,
+   * openNewestVideoAsset(), implied real recency sorting that was
+   * never implemented; it only works because of the single-video
+   * invariant above, not because it picks the newest of several. A
+   * RETRY_STEP that lands in a project that already has a video from
+   * an earlier attempt in the same project would break that invariant
+   * — flagged as a real, still-open risk below, not silently assumed
+   * away, since there's no confirmed timestamp/sort DOM to actually
+   * disambiguate by yet.
+   *
    * Honest limit: the asset picker's own item-row markup (what's
    * actually clickable — a specific class/tag) has NOT been confirmed
    * live. Best-effort fallback: click any visible `<img>` thumbnail
@@ -606,9 +617,13 @@
    * trigger the row's own click without needing to know the row's own
    * selector (this is ordinary DOM event bubbling, not the
    * `interestfor`-gated trusted-input requirement found on the ChatGPT
-   * side — unrelated mechanisms).
+   * side — unrelated mechanisms). Confirmed live by Aree: filtering to
+   * exactly one result can auto-show its preview without this click
+   * even being necessary — kept anyway since it's harmless when
+   * already showing, and still needed if the DOM/framing differs on a
+   * future run.
    */
-  async function openNewestVideoAsset(warnings) {
+  async function openVideoAssetFromPicker(warnings) {
     const dropzoneBtn = await FA_UTILS.waitFor(SEL.uploadDropzone, {
       step: STEP,
       description: 'ปุ่มเปิด asset picker (เพื่อเปิดวิดีโอที่ generate เสร็จแล้ว)',
@@ -624,23 +639,34 @@
       warnings.push('⚠️ ไม่เจอแท็บ "Videos" ใน asset picker — ข้ามการกรอง อาจเจอ asset อื่นที่ไม่ใช่วิดีโอปนอยู่ โปรดตรวจผลลัพธ์');
     }
 
-    let thumbnail = null;
+    let thumbnails = [];
     const start = Date.now();
-    while (!thumbnail && Date.now() - start < 8000) {
-      thumbnail = Array.from(document.querySelectorAll('img')).find(
+    while (!thumbnails.length && Date.now() - start < 8000) {
+      thumbnails = Array.from(document.querySelectorAll('img')).filter(
         (img) => FA_UTILS.isReallyVisible(img) && img.naturalWidth > 20
       );
-      if (!thumbnail) await FA_UTILS.sleep(250);
+      if (!thumbnails.length) await FA_UTILS.sleep(250);
     }
-    if (!thumbnail) {
+    if (!thumbnails.length) {
       throw new FASelectorError({
         step: STEP,
         description: 'thumbnail ของวิดีโอใน asset picker (เพื่อเปิดดูวิดีโอที่ generate เสร็จแล้ว)',
-        selectorsTried: ['img (ตัวแรกที่ visible ใน asset picker หลัง filter เป็น Videos)'],
-        siteHint: 'ยังไม่ยืนยัน DOM ของ asset list item สด — ตรวจผ่าน DevTools แล้วปรับ openNewestVideoAsset() ใน content-flow.js',
+        selectorsTried: ['img (visible ใน asset picker หลัง filter เป็น Videos)'],
+        siteHint: 'ยังไม่ยืนยัน DOM ของ asset list item สด — ตรวจผ่าน DevTools แล้วปรับ openVideoAssetFromPicker() ใน content-flow.js',
       });
     }
-    thumbnail.click();
+    // QA's real, still-open risk (see README "v34"): if RETRY_STEP ever
+    // lands in a project that already has a video from an earlier
+    // attempt, this filtered list would have more than one entry with
+    // no confirmed way here to tell which is actually the new one —
+    // flagged loudly rather than silently guessing "the first one."
+    if (thumbnails.length > 1) {
+      warnings.push(
+        `⚠️ เจอ ${thumbnails.length} video asset ใน picker (ไม่ใช่ 1 ตัวตามที่คาด — อาจเป็น retry ที่เข้า project ที่มีวิดีโอเก่าอยู่แล้ว) ` +
+          'เลือกตัวแรกที่เจอ ไม่ยืนยันว่าเป็นวิดีโอที่ generate รอบนี้จริง โปรดตรวจผลลัพธ์'
+      );
+    }
+    thumbnails[0].click();
     await FA_UTILS.randomDelay(600, 1200);
   }
 
@@ -651,7 +677,7 @@
       // Video generation is slower than a chat reply — give it more room.
       timeoutMs: 10 * 60 * 1000,
     });
-    await openNewestVideoAsset(warnings);
+    await openVideoAssetFromPicker(warnings);
     const videoEl = await FA_UTILS.waitFor(SEL.resultVideo, {
       step: STEP,
       description: 'วิดีโอผลลัพธ์',

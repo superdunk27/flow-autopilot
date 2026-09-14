@@ -13,6 +13,43 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v34: v33's core sequence manually verified live; renamed for what it actually does
+
+Aree manually walked through v33's exact sequence against the real
+Old Spice video already generated this session (no extra quota
+spent) and confirmed all 4 steps work as written: the "+" button opens
+the asset picker after generation, the "Videos" filter tab filters
+correctly (down to exactly the one video, since `storyboard.png` is an
+Image and gets excluded), filtering to one result auto-shows its
+preview (the thumbnail click wasn't even strictly necessary in this
+case, but is harmless and kept), and `document.querySelectorAll('video').length === 1`
+confirmed the real `<video src="https://flow-content.google/...">`
+mounted successfully. v33's sequence is correct as written.
+
+QA raised one real, still-open point about it that doesn't affect this
+confirmed case: the function was named `openNewestVideoAsset()`,
+implying real recency sorting that was never implemented — it only
+works because of the fresh-project single-video invariant (v33), not
+because it picks the newest of several. A `RETRY_STEP` that somehow
+lands in a project that already has a video from an earlier attempt
+would break that invariant, and there's no confirmed timestamp/sort
+DOM to disambiguate by if it ever happens.
+
+**Fixed the naming** (renamed to `openVideoAssetFromPicker()` — no
+claim of recency logic it doesn't have) and **added ambiguity
+detection**: if the "Videos" filter ever turns up more than one
+result, a clear warning is pushed naming the count and flagging the
+retry-into-existing-project risk explicitly, instead of silently
+picking "the first one" and calling it correct. Still picks the first
+result either way (no real sort/timestamp DOM to do better with yet)
+— this doesn't *solve* the multi-video case, it makes it visible
+instead of silent, consistent with this project's whole approach to
+unconfirmed edge cases.
+
+**Not live-tested this exact change**: the underlying sequence is
+now real-world-confirmed (Aree's manual walkthrough above); this
+specific rename + warning-on-ambiguity hasn't itself been re-run.
+
 ## v33: 🎉 video mode confirmed working end to end — last gap was navigation, not a selector
 
 Toey's final live test with Old Spice Wolfthorn: `setVideoGenerationMode()`
