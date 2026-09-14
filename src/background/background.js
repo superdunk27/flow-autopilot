@@ -131,22 +131,78 @@ const KEEPALIVE_ALARM_NAME = 'fa-keepalive';
 const KEEPALIVE_PERIOD_MINUTES = 0.4; // ~24s, under the ~30s idle threshold
 
 let keepalivePort = null;
+let keepaliveActive = false;
+const KEEPALIVE_CONNECT_MAX_ATTEMPTS = 20;
+const KEEPALIVE_CONNECT_RETRY_MS = 1000;
 
+/**
+ * Real bug found live 2026-09-15 (see README "v17"): the first version
+ * of this connected exactly once, synchronously, right after openTab()
+ * resolves — but openTab()/chrome.tabs.create() resolving only means
+ * the tab object exists, not that its page has loaded and the content
+ * script has run and registered its chrome.runtime.onConnect listener
+ * (content scripts run at document_idle, a real delay after tab
+ * creation). chrome.tabs.connect() doesn't throw when there's no
+ * listener on the other end yet — the try/catch around it never caught
+ * anything — the failure surfaces later, asynchronously, via
+ * onDisconnect with chrome.runtime.lastError set, which the old handler
+ * never read (just `keepalivePort = null`), which is exactly why Chrome
+ * logged it as "Unchecked runtime.lastError: Could not establish
+ * connection. Receiving end does not exist." in chrome://extensions —
+ * QA caught this from the error text alone before the mechanism was
+ * even fully diagnosed live. Net effect: the port connection almost
+ * certainly failed on its very first (only) attempt every time,
+ * providing zero actual protection — v16 shipped with a keepalive that
+ * never actually connected, which is why nothing improved.
+ *
+ * Fixed with the same retry-on-connect pattern already used elsewhere
+ * in this file for the identical "content script not ready yet" race
+ * (see sendMessageWithRetry): retry the connection (not just log and
+ * give up) whenever it disconnects while the step is still in flight —
+ * covers both "connected too early" and "a live port dropped mid-step"
+ * (e.g. the page navigating) with the same code path, and always reads
+ * chrome.runtime.lastError so Chrome stops flagging it as unchecked.
+ */
 function startKeepalive(tabId) {
   chrome.alarms.create(KEEPALIVE_ALARM_NAME, { periodInMinutes: KEEPALIVE_PERIOD_MINUTES });
+  keepaliveActive = true;
+  connectKeepalivePort(tabId, 1);
+}
+
+function connectKeepalivePort(tabId, attempt) {
+  let port;
   try {
-    keepalivePort = chrome.tabs.connect(tabId, { name: FA_KEEPALIVE_PORT_NAME });
-    keepalivePort.onDisconnect.addListener(() => {
-      keepalivePort = null;
-    });
+    port = chrome.tabs.connect(tabId, { name: FA_KEEPALIVE_PORT_NAME });
   } catch (err) {
-    // Best-effort — the alarm above still provides some protection even
-    // if the port fails to open (e.g. the tab closed already).
-    console.error('[Flow Autopilot] keepalive port failed to open', err);
+    console.debug('[Flow Autopilot] keepalive port connect() threw', { attempt, tabId, error: err && err.message });
+    scheduleKeepaliveRetry(tabId, attempt);
+    return;
   }
+  keepalivePort = port;
+  port.onDisconnect.addListener(() => {
+    // Reading this is required — an ignored chrome.runtime.lastError on
+    // a failed/closed connection is exactly what makes Chrome log it as
+    // "Unchecked runtime.lastError" (see doc comment above).
+    const lastErr = chrome.runtime.lastError;
+    console.debug('[Flow Autopilot] keepalive port disconnected', {
+      attempt,
+      tabId,
+      error: lastErr && lastErr.message,
+    });
+    if (keepalivePort === port) keepalivePort = null;
+    if (keepaliveActive) scheduleKeepaliveRetry(tabId, attempt);
+  });
+}
+
+function scheduleKeepaliveRetry(tabId, attempt) {
+  if (!keepaliveActive || attempt >= KEEPALIVE_CONNECT_MAX_ATTEMPTS) return;
+  setTimeout(() => {
+    if (keepaliveActive) connectKeepalivePort(tabId, attempt + 1);
+  }, KEEPALIVE_CONNECT_RETRY_MS);
 }
 
 function stopKeepalive() {
+  keepaliveActive = false;
   chrome.alarms.clear(KEEPALIVE_ALARM_NAME);
   if (keepalivePort) {
     try {

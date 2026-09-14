@@ -13,6 +13,98 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v17: the v16 keepalive port never actually connected — fixed the connect race
+
+Aree tested v16 live (fresh run, extension reloaded first — ruled out
+the "stale cached script" explanation): identical symptom, same stuck
+point, same evidence pattern. New this round: `chrome://extensions/?errors=`
+showed one real entry for the first time — `Unchecked runtime.lastError:
+Could not establish connection. Receiving end does not exist.` QA
+independently spotted the same root cause from reading the v16 diff
+alone: `startKeepalive()`'s `onDisconnect` handler just set
+`keepalivePort = null` — never read `chrome.runtime.lastError`, never
+retried, never logged anything.
+
+Confirmed precisely: `startKeepalive(tabId)` calls `chrome.tabs.connect()`
+exactly once, synchronously, right after `openTab()` resolves —
+but `chrome.tabs.create()` resolving only means the tab object exists,
+not that the page has loaded and the content script has run and
+registered its `onConnect` listener (content scripts run at
+`document_idle`, a real delay after tab creation — this is the exact
+same "content script not ready yet" race `sendMessageWithRetry()`
+already exists elsewhere in this file to handle, just not applied to
+the new connect call). `chrome.tabs.connect()` doesn't throw when
+there's no listener on the other end yet, so the `try/catch` around it
+never caught anything — the failure only surfaces later, asynchronously,
+via `onDisconnect` with `chrome.runtime.lastError` set, which the old
+handler discarded unread. Net effect: the port almost certainly failed
+to connect on its one and only attempt, every single time, providing
+**zero actual protection** — v16 shipped a keepalive that never
+connected, which is exactly why nothing improved.
+
+Also answered directly (Aree's Q3): `sendStepDone()` (v16) sends the
+actual result via a completely separate, independent
+`chrome.runtime.sendMessage()` — never through the keepalive port,
+which exists solely to keep the service worker alive as a side effect
+of staying open, not to carry data. The new "Unchecked lastError" is
+consistent with coming *only* from the broken port-connect code, not
+from `sendStepDone`'s own (promise-based, properly awaited/caught, so
+never "unchecked") retries — but that also means this round's evidence
+doesn't tell us whether `sendStepDone` itself ran, retried, or
+succeeded; its own `console.error` lines land in the **chat tab's own**
+DevTools console, not `chrome://extensions/?errors=` — worth checking
+directly next time to separate "the message was retried and still
+failed" from "something upstream of it never got that far."
+
+**Fixed**: `connectKeepalivePort()`/`scheduleKeepaliveRetry()` retry the
+connection (up to 20 attempts, 1s apart) whenever it disconnects while
+the step is still in flight — covers both "connected too early" and "a
+live port dropped mid-step" (e.g. a page navigation) with the same code
+path — and always reads `chrome.runtime.lastError` in `onDisconnect` so
+Chrome stops flagging it as unchecked, logging it via `console.debug`
+for diagnosability instead.
+
+**Not live-tested this round**: verified via `node --check` only.
+
+### Direct answer to Toey's question: the expected code path after a successful analyze reply
+
+Traced from the actual current code, not from memory/assumption:
+
+1. **`extractLastAssistantText()`** (`content-chatgpt.js`) is a plain
+   synchronous DOM read — no `await` inside it, can't itself hang.
+   Runs right after `checkForMissingImageReply()` (also synchronous),
+   both after `attachAndSend()` returns.
+2. **`sendStepDone({type: STEP_DONE, step: 'analyze', ok: true, payload: {raw, storyboardPlan, storyboardPrompt, videoPrompt, warnings}})`**
+   sends to **background.js only** — content scripts cannot message the
+   popup directly, ever. This is the step retried up to 4x since v16.
+3. **background.js's `handleStepDone()`** receives it, calls
+   `appendWarnings()`, then reads `opts.autoReview` (**default `true`**,
+   confirmed in `messages.js` — not changed by anything in this
+   session): with `autoReview: true` (the live default), it calls
+   `setRun({...patch, status: AWAITING_REVIEW, currentStep: 'analyze'})`
+   and **stops there** — no new tab, no auto-continuing to imagegen.
+   That single `setRun()` write is what `popup.js`'s
+   `chrome.storage.onChanged` listener picks up to switch the popup from
+   the running view to the review checkpoint (editable Storyboard
+   Plan/Storyboard Prompt/Video Prompt fields + "ดำเนินการต่อ" button).
+   Only if `autoReview` were `false` would background open the imagegen
+   tab immediately on its own, skipping the checkpoint.
+4. **"[analyze] ChatGPT ตอบเสร็จแล้ว กำลังตรวจสอบผลลัพธ์…"** is set once,
+   inside `attachAndSend()`, immediately after `waitForGenerationComplete()`
+   resolves (ChatGPT's "Stop generating" button disappearing) — and nothing
+   updates it again anywhere in this stretch. It stays displayed through,
+   in order: the rate-limit text scan, `checkForMissingImageReply()`,
+   `extractLastAssistantText()`, `parseAnalysisResponse()`, and finally
+   `sendStepDone()` — the **only** part of that whole stretch that's
+   slow/async/can actually get stuck (its own retries can take up to
+   ~7s; everything before it is synchronous DOM/regex work). This label
+   not updating again until either success (view switches away entirely
+   to the review checkpoint) or a thrown error is itself a real,
+   separate observability gap — the same class v12 already fixed for
+   the send-button wait, not yet applied here. Flagged as a real
+   follow-up, not fixed in this round (scope stayed on the connect-race
+   bug specifically, per the immediate ask).
+
 ## v16: keepalive upgraded to a persistent port; STEP_DONE made retry-safe
 
 Answering Aree's direct question: does the v13 alarm keepalive actually
