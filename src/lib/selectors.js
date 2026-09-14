@@ -244,11 +244,23 @@
       // same framework pattern as ChatGPT's composer but with nothing
       // unique to anchor a selector to — only the generic
       // `div[contenteditable="true"]` catch-all below would actually
-      // match it today. Left as-is rather than guessing a fake
-      // specific selector; worth tightening once there's a reliable way
-      // to disambiguate it from other contenteditable elements on the
-      // page (there's also a real `input[type="text"]` search box and
-      // an "Editable text"-labelled input elsewhere on the same page).
+      // match it today. There's also a real `input[type="text"]` search
+      // box and an "Editable text"-labelled input elsewhere on the same
+      // page — QA flagged (2026-09-15, see README "v26") that
+      // `document.querySelector` on the bare catch-all just grabs
+      // whichever qualifying element comes first in DOM order, which
+      // could easily be one of those instead of the real prompt box,
+      // with real quota-cost consequences (typing/generating against
+      // the wrong field on a step with a scarce ~5/day limit). The
+      // first 3 specific candidates below are tried via plain
+      // `document.querySelector` first (safe — an aria-label/placeholder
+      // actually containing "prompt" is a strong signal); the generic
+      // catch-alls are NOT used via a bare selector anymore —
+      // content-flow.js's `findPromptField()` handles those by scoring
+      // all visible candidates instead (excludes ones matching known
+      // non-prompt hints, then picks the largest by rendered area — the
+      // main composer is expected to visually dominate the page far
+      // more than a small utility input).
       promptField: [
         'textarea[placeholder*="prompt" i]',
         'textarea[aria-label*="prompt" i]',

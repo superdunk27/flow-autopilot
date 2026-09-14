@@ -179,16 +179,103 @@
     }
     addToPromptBtn.click();
     await FA_UTILS.randomDelay(500, 1000);
+
+    // QA's Q2 (2026-09-15, see README "v26") — not previously checked
+    // at all: nothing confirmed the click actually did anything. Weak
+    // but real signal, since the exact post-click DOM (e.g. "does a
+    // thumbnail now appear in the prompt box") isn't confirmed live:
+    // the asset picker's own button is expected to disappear/become
+    // not-visible once its action completes (closing the picker) — if
+    // it's still clearly there and visible, that's worth a warning, not
+    // a hard failure, since this heuristic itself isn't live-confirmed
+    // either and a false failure here would be worse than a missed one.
+    if (FA_UTILS.isReallyVisible(addToPromptBtn)) {
+      warnings.push('⚠️ ปุ่ม "Add to prompt": คลิกแล้วแต่ปุ่มยังแสดงอยู่ (ไม่ปิด asset picker) — ไม่ยืนยันได้ว่าคลิกมีผลจริง โปรดตรวจผลลัพธ์');
+    }
+  }
+
+  // Real gap found by QA reviewing ef7db33 (2026-09-15, see README
+  // "v26") — exactly the risk that fix was meant to close, one step
+  // later: SEL.promptField's generic catch-alls (`textarea`,
+  // `div[contenteditable="true"]`) went through a bare
+  // `document.querySelector`, which just returns whichever qualifying
+  // element comes first in DOM order — the real prompt box has no
+  // id/testid/aria-label at all (see selectors.js), and the same page
+  // also has an unrelated search input and an "Editable text"-labelled
+  // field QA found live. Typing the video prompt into the wrong one
+  // and clicking Generate would waste a real, scarce (~5/day) quota
+  // unit — the exact failure mode ef7db33 just fixed for the image,
+  // now checked for the text too.
+  const PROMPT_FIELD_EXCLUDE_HINTS = [/search/i, /editable text/i];
+
+  async function findPromptField(step, { timeoutMs = 20000, pollMs = 250 } = {}) {
+    // The first 3 candidates in SEL.promptField require an
+    // aria-label/placeholder actually containing "prompt" — a strong,
+    // specific signal, safe to trust via a plain querySelector if one
+    // ever matches (kept in case a future DOM revision adds one).
+    const specificSelectors = SEL.promptField.slice(0, 3);
+    const start = Date.now();
+    for (;;) {
+      for (const sel of specificSelectors) {
+        let el = null;
+        try {
+          el = document.querySelector(sel);
+        } catch (_) { /* ignore invalid selector */ }
+        if (el) return el;
+      }
+      // No specific match — score every visible contenteditable/textarea
+      // instead of trusting "first in DOM order": exclude known
+      // non-prompt hints, then prefer the largest rendered one, since
+      // the main composer is expected to visually dominate the page far
+      // more than a small utility input like a search box.
+      const candidates = Array.from(document.querySelectorAll('textarea, div[contenteditable="true"]'))
+        .filter((el) => FA_UTILS.isReallyVisible(el))
+        .filter((el) => {
+          const label = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('placeholder') || ''}`;
+          return !PROMPT_FIELD_EXCLUDE_HINTS.some((re) => re.test(label));
+        });
+      if (candidates.length) {
+        candidates.sort((a, b) => {
+          const ra = a.getBoundingClientRect();
+          const rb = b.getBoundingClientRect();
+          return rb.width * rb.height - ra.width * ra.height;
+        });
+        return candidates[0];
+      }
+      if (Date.now() - start > timeoutMs) {
+        throw new FASelectorError({
+          step,
+          description: 'ช่องกรอก prompt วิดีโอ',
+          selectorsTried: SEL.promptField,
+          siteHint: 'ตรวจ DOM จริงผ่าน DevTools ว่า contenteditable/textarea ตัวไหนคือ prompt box จริง แล้วปรับ exclude hints ใน findPromptField()',
+        });
+      }
+      await FA_UTILS.sleep(pollMs);
+    }
   }
 
   async function submitVideoPrompt(videoPrompt, warnings) {
-    const promptField = await FA_UTILS.waitFor(SEL.promptField, {
-      step: STEP,
-      description: 'ช่องกรอก prompt วิดีโอ',
-    });
+    const promptField = await findPromptField(STEP);
     collectWarning(warnings, promptField, SEL.promptField, 'ช่องกรอก prompt');
     FA_UTILS.typeIntoComposer(promptField, videoPrompt);
     await FA_UTILS.randomDelay(500, 1100);
+
+    // Verify the text actually landed in THIS field before ever
+    // touching Generate — closes the same risk QA flagged, checked
+    // rather than assumed: if findPromptField()'s heuristic picked the
+    // wrong element, this catches it here instead of at the cost of a
+    // real quota unit.
+    const landedText = (promptField.value ?? promptField.innerText ?? promptField.textContent ?? '').trim();
+    const expectedSnippet = videoPrompt.trim().slice(0, 15);
+    if (!landedText || (expectedSnippet && !landedText.includes(expectedSnippet))) {
+      throw new FASelectorError({
+        step: STEP,
+        description:
+          `ยืนยันว่า video prompt พิมพ์เข้าช่องที่ถูกต้องจริง (เจอข้อความในช่อง: "${landedText.slice(0, 80)}") ` +
+          '— ไม่ตรงกับ prompt ที่ควรพิมพ์ อาจพิมพ์เข้าช่องผิด (เช่น search box) ไม่กด Generate ต่อเพื่อป้องกันเสีย quota ฟรีๆ',
+        selectorsTried: SEL.promptField,
+      });
+    }
 
     let generateBtn;
     try {
@@ -210,6 +297,26 @@
           selectorsTried: [...SEL.generateButton, `<text match: ${GENERATE_TEXT_PATTERNS.join(', ')}>`],
         });
       }
+    }
+    // Real live evidence (Toey, 2026-09-15, see README "v26"): hovering
+    // this exact button showed a tooltip reading "prompt must be
+    // provided" — the button is a real disabled-state element gated by
+    // Flow's own validation when the request is incomplete, not merely
+    // "clicking it does nothing." Clicking a disabled element fires no
+    // handler and throws nothing, which is almost certainly why the
+    // earlier live test's Generate click produced no visible error at
+    // all despite the request being incomplete — a silent no-op that
+    // looked like success. Checked explicitly now, same pattern as
+    // waitForSendButtonReady() on the ChatGPT side: never click blind.
+    if (!FA_UTILS.isEnabled(generateBtn)) {
+      throw new FASelectorError({
+        step: STEP,
+        description:
+          'ปุ่ม Generate ยัง disabled อยู่ (Flow เองบอกไว้ตรงๆ ผ่าน tooltip ว่า "prompt must be provided" ' +
+          'เมื่อข้อมูลไม่ครบ) — ไม่กดปุ่มที่ disabled เพื่อป้องกันการคลิกที่ไม่มีผลอะไรเลยแบบเงียบๆ ' +
+          'ตรวจว่ารูป (ผ่าน "Add to prompt") และ prompt text เข้าไปในช่องที่ถูกต้องจริงหรือยัง',
+        selectorsTried: SEL.generateButton,
+      });
     }
     generateBtn.click();
   }

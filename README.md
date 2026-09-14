@@ -13,6 +13,68 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v26: QA's pre-live-test review — same wrong-field quota risk, one step later in the same fix
+
+QA reviewed ef7db33 in detail before Aree would spend real quota
+testing it, and found 2 real gaps — one blocking, one not:
+
+**Q3 (blocking, fixed)**: `SEL.promptField`'s generic catch-alls
+(`textarea`, `div[contenteditable="true"]`) went through a bare
+`document.querySelector` — which just returns whichever qualifying
+element comes first in DOM order. The real prompt box has no
+id/testid/aria-label at all (documented as a known gap since v6), and
+the same page also has an unrelated search input and an "Editable
+text"-labelled field. Typing the video prompt into the wrong one and
+clicking Generate would waste a real, scarce (~5/day) quota unit — the
+*exact* failure mode v25 just fixed for the image, one step later, for
+the text.
+
+Fixed with a new `findPromptField()`: tries the 3 specific "prompt"-
+labelled candidates via plain `querySelector` first (safe, a real
+signal if one ever matches), then — instead of trusting "first in DOM
+order" — scores every visible `textarea`/`div[contenteditable="true"]`
+candidate, excluding ones matching known non-prompt hints (`search`,
+`editable text`), and picks the largest by rendered area (the main
+composer is expected to visually dominate the page far more than a
+small utility input). Also added a **verify-after-type check**: reads
+back the field's actual content right after typing and compares
+against the start of the intended prompt — if it doesn't match,
+throws *before* Generate is ever reached, converting an unverified
+assumption into a checked precondition on the one step where being
+wrong has real cost.
+
+**Q2 (non-blocking, fixed anyway)**: nothing previously confirmed
+`addToPromptBtn.click()` (v25) had any effect at all. Added a weak but
+real signal — if the button is still clearly visible after clicking
+(the asset picker is expected to close), push a warning rather than
+proceed silently. Kept as a warning, not a hard failure, since this
+specific heuristic (button disappears on success) isn't itself
+live-confirmed either, and a false failure here would be worse than a
+missed one.
+
+**Bonus real finding while this was in progress**: Toey checked the
+live Flow UI directly and confirmed the mechanism precisely — hovering
+the Generate button (while the request was genuinely incomplete)
+showed a tooltip reading **"prompt must be provided"**. This isn't a
+theory anymore: Generate is a real disabled-state element, gated by
+Flow's own validation, not a button that "just doesn't do anything
+useful" when clicked incomplete. Clicking a disabled element fires no
+handler and throws nothing — almost certainly why v24/v25's earlier
+live test's Generate click produced zero visible error despite the
+request being incomplete, a silent no-op that looked like a real
+click succeeding.
+
+**Fixed the same gap this reveals**: `submitVideoPrompt()` never
+checked `generateBtn` was actually enabled before clicking it — added
+that check, same pattern as `waitForSendButtonReady()` on the ChatGPT
+side (never click blind). If still disabled at that point, throws a
+clear error referencing the real confirmed tooltip text, instead of
+clicking a no-op button and silently doing nothing.
+
+**Not live-tested this round**: verified via `node --check` only, by
+explicit request — Aree held off spending real quota on a live test
+until this review was addressed first.
+
 ## v25: found a missing step, not a wrong one — "Add to prompt" was never clicked
 
 Aree live-tested v24's Generate-button fix: the button was now found
