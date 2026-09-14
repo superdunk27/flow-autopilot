@@ -13,6 +13,48 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v45: v12 template — drop "panels" from the text-lock sentence, move the crop instruction earlier in Section 3
+
+Toey observed the scene-1-grid bug (the video's opening scene showing the
+whole 5-panel grid instead of a cropped Panel 1) started exactly at v7 —
+confirmed from real logs, not a guess: v6 never had this bug, and v7 is
+precisely where the text-lock paragraph was introduced, containing the
+first-ever mention of the word "panels" in a comparison/merging context
+("combine text from two different panels into a single scene"). That
+wording may have unintentionally raised the model's attention toward
+"multiple panels combined," and separately, the crop instruction (added
+in v9) sat mid-sentence *after* "...in the same order as the panels" —
+possibly letting the model settle on the raw ungapped image before the
+crop instruction arrived.
+
+**Two changes, Section 3 only (Section 1/2 untouched)**:
+
+1. Moved the "CRITICAL — each scene is its own standalone cropped
+   photo..." paragraph (v9) out of the middle of the "animate...in the
+   same order as the panels." sentence into its own standalone
+   paragraph, placed immediately after the product-lock CRITICAL and
+   before "A single video generation prompt...".
+2. Changed the text-lock sentence (v7) from "Do not redraw, regenerate,
+   retype, or combine text from two different panels into a single
+   scene." to "Do not redraw, regenerate, retype, or merge wording from
+   another scene into this one." — drops "panels" entirely, uses
+   "scene" throughout instead.
+
+**Verified byte-exact with the same 3-method discipline used since v9**:
+extracted the v12 Section 3 block programmatically from the spec doc
+(no manual retyping) and spliced it into `messages.js` via Python —
+(1) verbatim checks that the old phrasing is gone and the new phrasing
+is present, with the crop paragraph now bounded by blank lines on both
+sides; (2) splice-reconstruction confirming Section 1 + Section 2 +
+preamble, and the trailing "Always base shot details..." paragraph,
+are byte-identical before/after — only the Section 3 body changed;
+(3) length arithmetic — new Section 3 is exactly 11 characters shorter
+than old, matching the diff (`git diff` confirms only these two
+paragraphs changed, nothing else in the file touched). `node --check`
+passes. Not live-tested this round (prompt-text-only change, no new
+DOM/selector logic) — next real video generation will show whether
+this actually clears the scene-1-grid bug Toey observed.
+
 ## v44: 🐛 2 real reliability gaps on Google Flow — silent-assume new-project + premature "Add to prompt"
 
 Toey reported two flaky-in-practice issues from real hands-on testing on
