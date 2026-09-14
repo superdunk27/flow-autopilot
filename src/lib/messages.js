@@ -17,6 +17,7 @@
 
     // content -> background
     STEP_DONE: 'FA_STEP_DONE',
+    STEP_PROGRESS: 'FA_STEP_PROGRESS',
   };
 
   root.FA_STORAGE_KEYS = {

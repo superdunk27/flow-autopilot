@@ -109,6 +109,7 @@ async function startAnalyzeStep(productImageDataUrl) {
     tabIds: { analyze: tabId },
     error: null,
     warnings: [],
+    progressLabel: null,
   });
   try {
     await withCeiling(
@@ -138,6 +139,7 @@ async function startImageGenStep(storyboardPrompt) {
     storyboardPrompt,
     tabIds: { ...run.tabIds, imagegen: tabId },
     error: null,
+    progressLabel: null,
   });
   try {
     await withCeiling(
@@ -167,6 +169,7 @@ async function startFlowStep(videoPrompt) {
     videoPrompt,
     tabIds: { ...run.tabIds, flow: tabId },
     error: null,
+    progressLabel: null,
   });
   try {
     await withCeiling(
@@ -201,33 +204,63 @@ async function handleMessage(message, sender) {
       return { run: await getRun(), options: await getOptions() };
     }
 
+    // START_RUN/CONFIRM_STEP/RETRY_STEP are each wrapped in their own
+    // try/catch that writes to run state via fail() on any throw — not
+    // just the errors already handled inside startAnalyzeStep() etc.
+    // Real gap found (2026-09-15, see README "v11"): popup.js's Run/
+    // Confirm/Retry click handlers are fire-and-forget
+    // (chrome.runtime.sendMessage with no response handling), so if
+    // something threw *before* reaching a step-starter's own internal
+    // try/catch (e.g. getOptions()/openTab() failing), the only catch
+    // was the generic top-level one below, which just logs to the
+    // service worker's own (invisible to the user) console and returns
+    // a response nobody reads — a genuine silent-fail path, distinct
+    // from anything already covered by fail() inside the step starters.
     case FA_MSG.START_RUN: {
-      await startAnalyzeStep(message.payload.productImageDataUrl);
+      try {
+        await startAnalyzeStep(message.payload.productImageDataUrl);
+      } catch (err) {
+        console.error('[Flow Autopilot] START_RUN failed before its own error handling', err);
+        await fail('setup', `เริ่ม run ไม่สำเร็จ: ${err.message || err}`, 'ลองใหม่ หรือเช็ค console ของ background service worker (chrome://extensions → รายละเอียด → ตรวจสอบ service worker)');
+      }
       return { ok: true };
     }
 
     case FA_MSG.CONFIRM_STEP: {
-      const { step, fields } = message.payload;
-      if (step === FA_STEPS.ANALYZE) {
-        await setRun({
-          storyboardPlan: fields.storyboardPlan,
-          storyboardPrompt: fields.storyboardPrompt,
-          videoPrompt: fields.videoPrompt,
-        });
-        await startImageGenStep(fields.storyboardPrompt);
-      } else if (step === FA_STEPS.IMAGEGEN) {
-        await setRun({ videoPrompt: fields.videoPrompt });
-        await startFlowStep(fields.videoPrompt);
+      try {
+        const { step, fields } = message.payload;
+        if (step === FA_STEPS.ANALYZE) {
+          await setRun({
+            storyboardPlan: fields.storyboardPlan,
+            storyboardPrompt: fields.storyboardPrompt,
+            videoPrompt: fields.videoPrompt,
+          });
+          await startImageGenStep(fields.storyboardPrompt);
+        } else if (step === FA_STEPS.IMAGEGEN) {
+          await setRun({ videoPrompt: fields.videoPrompt });
+          await startFlowStep(fields.videoPrompt);
+        }
+      } catch (err) {
+        console.error('[Flow Autopilot] CONFIRM_STEP failed before its own error handling', err);
+        await fail(message.payload?.step || 'unknown', `ดำเนินการต่อไม่สำเร็จ: ${err.message || err}`);
       }
       return { ok: true };
     }
 
     case FA_MSG.RETRY_STEP: {
-      const run = await getRun();
-      if (!run) return { ok: false, error: 'ไม่มี run ให้ retry' };
-      if (run.currentStep === FA_STEPS.ANALYZE) await startAnalyzeStep(run.productImageDataUrl);
-      else if (run.currentStep === FA_STEPS.IMAGEGEN) await startImageGenStep(run.storyboardPrompt);
-      else if (run.currentStep === FA_STEPS.FLOW) await startFlowStep(run.videoPrompt);
+      try {
+        const run = await getRun();
+        if (!run) {
+          console.error('[Flow Autopilot] RETRY_STEP called with no run in storage');
+          return { ok: false, error: 'ไม่มี run ให้ retry' };
+        }
+        if (run.currentStep === FA_STEPS.ANALYZE) await startAnalyzeStep(run.productImageDataUrl);
+        else if (run.currentStep === FA_STEPS.IMAGEGEN) await startImageGenStep(run.storyboardPrompt);
+        else if (run.currentStep === FA_STEPS.FLOW) await startFlowStep(run.videoPrompt);
+      } catch (err) {
+        console.error('[Flow Autopilot] RETRY_STEP failed before its own error handling', err);
+        await fail(message.payload?.step || 'unknown', `ลองใหม่ไม่สำเร็จ: ${err.message || err}`);
+      }
       return { ok: true };
     }
 
@@ -238,6 +271,17 @@ async function handleMessage(message, sender) {
 
     case FA_MSG.STEP_DONE: {
       await handleStepDone(message);
+      return { ok: true };
+    }
+
+    case FA_MSG.STEP_PROGRESS: {
+      // Lightweight, best-effort progress label so the popup can show
+      // *what's actually happening* during a long wait instead of a
+      // static "กำลังทำงาน" the whole time — a long-but-legitimate wait
+      // (e.g. a large real photo taking a while to upload) is otherwise
+      // visually indistinguishable from something silently stuck. Never
+      // throws on a stale/racing update; last write wins.
+      await setRun({ progressLabel: message.label || null });
       return { ok: true };
     }
 

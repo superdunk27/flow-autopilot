@@ -11,6 +11,30 @@
 (function () {
   const SEL = FA_SELECTORS.chatgpt;
 
+  /**
+   * Best-effort progress label, sent to background (which stores it for
+   * the popup to render) and always logged to this tab's own console.
+   * Added 2026-09-15 (see README "v11") after a real report of the
+   * pipeline appearing to do *nothing* for an uncomfortably long
+   * stretch — not an actual silent failure (every step still eventually
+   * throws or succeeds), but a long, legitimate wait (e.g. a real,
+   * several-MB photo taking a while to upload) is otherwise visually
+   * indistinguishable from something stuck, since neither the chat tab
+   * nor the popup showed *any* incremental signal before this. Never
+   * awaited/blocking — a failure to deliver a progress update must never
+   * affect the actual pipeline.
+   */
+  function reportProgress(label) {
+    console.log('[Flow Autopilot]', label);
+    try {
+      chrome.runtime.sendMessage({ type: FA_MSG.STEP_PROGRESS, label });
+    } catch (_) {
+      // extension context can be invalidated mid-run (e.g. reload) —
+      // progress reporting is non-critical, never let this break the
+      // actual step.
+    }
+  }
+
   function collectWarning(warnings, el, selectorList, label) {
     if (FA_UTILS.isLastResortMatch(el, selectorList)) {
       warnings.push(
@@ -84,6 +108,7 @@
    * anything elsewhere on the page.
    */
   async function enterCreateImageMode(step, warnings) {
+    reportProgress(`[${step}] กำลังกดปุ่ม "+" เพื่อเข้าโหมด Create image…`);
     const plusBtn = await FA_UTILS.waitFor(SEL.plusMenuButton, {
       step,
       description: 'ปุ่ม "+" เปิดเมนู attachment/tools',
@@ -101,6 +126,8 @@
           'เปิด DevTools บนหน้าจริง ลองคลิก/hover ปุ่มเองดูว่าเมนูเปิดอย่างไร แล้วปรับ tryOpenPlusMenu() ให้ตรง',
       });
     }
+
+    reportProgress(`[${step}] เมนู "+" เปิดแล้ว กำลังหารายการ "Create image"…`);
 
     // Poll within the confirmed-open menu only — never the whole
     // document — since the menu's content may render a moment after the
@@ -120,6 +147,7 @@
       });
     }
     menuItem.click();
+    reportProgress(`[${step}] กดเมนู "Create image" แล้ว`);
     await FA_UTILS.randomDelay(500, 1000);
   }
 
@@ -139,13 +167,16 @@
    * anything else touches the page.
    */
   async function waitForPageReady(step) {
+    reportProgress(`[${step}] รอหน้าเว็บ chatgpt.com โหลดพร้อมใช้งาน…`);
     await FA_UTILS.waitFor(SEL.composer, {
       step,
       description: 'ช่องพิมพ์ข้อความ (composer) — รอหน้าเว็บโหลดพร้อมใช้งานก่อนเริ่ม',
+      timeoutMs: 15000,
     });
     await FA_UTILS.waitFor(SEL.plusMenuButton, {
       step,
       description: 'ปุ่ม "+" — รอหน้าเว็บโหลดพร้อมใช้งานก่อนเริ่ม',
+      timeoutMs: 15000,
     });
     await FA_UTILS.sleep(1500);
     const stillPresent = (list) => list.some((sel) => {
@@ -158,12 +189,15 @@
     if (!stillPresent(SEL.composer) || !stillPresent(SEL.plusMenuButton)) {
       // Page re-rendered during the settle window (hydration replaced an
       // early skeleton) — wait once more for things to exist again.
+      reportProgress(`[${step}] หน้าเว็บ re-render ระหว่างรอ — รออีกครั้ง…`);
       await FA_UTILS.waitFor(SEL.composer, {
         step,
         description: 'ช่องพิมพ์ข้อความ (composer) — หน้าเว็บ re-render ระหว่างรอ',
+        timeoutMs: 15000,
       });
       await FA_UTILS.sleep(1000);
     }
+    reportProgress(`[${step}] หน้าเว็บพร้อมใช้งานแล้ว`);
   }
 
   /**
@@ -190,6 +224,7 @@
     const ATTEMPT_TIMEOUT_MS = 25000;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
+        reportProgress(`[${step}] กำลังหาช่องแนบไฟล์ (รอบ ${attempt}/${MAX_ATTEMPTS})…`);
         const fileInput = await FA_UTILS.waitFor(SEL.fileInput, {
           step,
           description: 'ช่องแนบไฟล์ (file input) ของ ChatGPT',
@@ -197,6 +232,7 @@
         collectWarning(warnings, fileInput, SEL.fileInput, 'ช่องแนบไฟล์');
         const file = FA_UTILS.dataUrlToFile(productImageDataUrl, 'product.png');
         await FA_UTILS.attachFileToInput(fileInput, file);
+        reportProgress(`[${step}] แนบไฟล์แล้ว กำลังรอ ChatGPT ยืนยันว่าอัปโหลดสำเร็จ (รอบ ${attempt}/${MAX_ATTEMPTS}, timeout ${ATTEMPT_TIMEOUT_MS / 1000}s)…`);
 
         // REQUIRED gate, not optional — a real user hit exactly the
         // failure this was previously soft about: the send button
@@ -217,8 +253,10 @@
           timeoutMs: ATTEMPT_TIMEOUT_MS,
         });
         collectWarning(warnings, attachmentChip, SEL.attachmentPreview, 'ภาพตัวอย่างไฟล์แนบ');
+        reportProgress(`[${step}] แนบไฟล์สำเร็จ ยืนยันแล้ว`);
         return;
       } catch (err) {
+        reportProgress(`[${step}] แนบไฟล์รอบ ${attempt}/${MAX_ATTEMPTS} ไม่สำเร็จ: ${(err.message || '').slice(0, 80)}`);
         if (attempt < MAX_ATTEMPTS) {
           warnings.push(
             `⚠️ แนบไฟล์รอบที่ ${attempt} ไม่สำเร็จ (${(err.message || '').slice(0, 100)}) — ลองใหม่อีกครั้งหลังรอหน้าเว็บ/อัปโหลดเพิ่ม`
@@ -248,6 +286,7 @@
     await attachProductImage(step, productImageDataUrl, warnings);
     await FA_UTILS.randomDelay(500, 1100);
 
+    reportProgress(`[${step}] กำลังพิมพ์ข้อความ…`);
     const composer = await FA_UTILS.waitFor(SEL.composer, {
       step,
       description: 'ช่องพิมพ์ข้อความ (composer)',
@@ -287,12 +326,14 @@
     }
 
     sendBtn.click();
+    reportProgress(`[${step}] ส่งข้อความแล้ว กำลังรอ ChatGPT ตอบ…`);
 
     await FA_UTILS.waitForGenerationComplete(SEL.stopGeneratingButton, {
       step,
       description: 'ChatGPT กำลังตอบ',
       timeoutMs: 5 * 60 * 1000,
     });
+    reportProgress(`[${step}] ChatGPT ตอบเสร็จแล้ว กำลังตรวจสอบผลลัพธ์…`);
 
     // ChatGPT free tier rate-limits chats with files/images attached —
     // confirmed real live 2026-09-14 (see README "v5"). Checked here,

@@ -13,6 +13,80 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v11: closed a real silent-fail gap + live progress reporting
+
+Toey's next test hit the worst version of this yet: **no error at all**
+— arrived at the chat, no upload, no message typed, nothing. Directly
+against the project's core anti-silent-fail principle, so treated as
+top priority.
+
+Traced the entire flow (popup click → background → content script →
+back) for anywhere an exception could go unreported, and found two real
+things, not one:
+
+1. **A genuine silent-fail gap**, confirmed by code reading:
+   `handleMessage`'s `START_RUN`/`CONFIRM_STEP`/`RETRY_STEP` cases had no
+   try/catch of their own — only `startAnalyzeStep()` etc.'s *internal*
+   try/catch (around the `sendMessageWithRetry` call) wrote to run state
+   via `fail()`. If something threw *before* reaching that internal
+   try/catch (e.g. `getOptions()` or `chrome.tabs.create()` failing), the
+   only catch was the generic top-level one in `background.js`, which
+   logs to the service worker's own console (invisible anywhere a normal
+   user would look) and calls `sendResponse()` — which `popup.js`'s
+   `runBtn`/`retryBtn`/`reviewContinueBtn` click handlers never read
+   (fire-and-forget `chrome.runtime.sendMessage()` with no response
+   handling). Run status would just stay wherever it was — genuinely
+   silent, exactly what was reported. (Not confirmed to be *this*
+   incident's specific cause — the chat tab did open, meaning
+   `getOptions()`/`openTab()` both succeeded — but a real, independent
+   gap worth closing regardless.)
+2. **The more likely explanation for this specific report**: nothing
+   was actually silently *failing* — the pipeline was silently
+   *working* for an uncomfortably long stretch with **zero visible
+   feedback** anywhere (not on the chat tab, not in the popup beyond a
+   static "กำลังทำงาน"), which is functionally indistinguishable from
+   broken to someone watching in real time. v10 had just widened
+   `attachProductImage()`'s budget to up to ~85+ seconds across 3
+   attempts to accommodate realistically-sized real photos — a
+   reasonable fix in isolation, but one that made the "did nothing
+   change in front of me" window uncomfortably long with no progress
+   signal to distinguish "still working" from "stuck."
+
+Fixed both:
+
+- **`handleMessage`'s `START_RUN`/`CONFIRM_STEP`/`RETRY_STEP` cases now
+  each wrap their body in a try/catch that calls `fail()` on any throw**
+  — closing the gap regardless of exactly where in the chain something
+  fails. `popup.js`'s click handlers also now check the response and
+  `console.error` on an unexpected shape, as a secondary safety net.
+- **New live progress reporting**: content scripts call
+  `reportProgress(label)` at every real milestone (page-ready wait
+  started/confirmed, file-input found, attach attempt N/3, attachment
+  confirmed, "+" clicked, menu opened, "Create image" clicked, composer
+  typed, message sent, ChatGPT replied) — sent via a new
+  `FA_MSG.STEP_PROGRESS` message, stored in `run.progressLabel`
+  (background), and rendered live in the popup's running view. Every
+  call also `console.log`s to the chat tab's own DevTools console, so
+  the pipeline's state is inspectable there too, not just via the popup.
+  As a side benefit, `progressLabel` updates go through `setRun()`,
+  which bumps `updatedAt` — the existing "looks stuck" hint (see v4) now
+  effectively resets on genuine progress instead of just on step/status
+  transitions, making it more accurate, not just more informative.
+- `waitForPageReady()`'s two `waitFor` calls now specify an explicit
+  15s timeout each (was relying on the unstated 20s default) — Toey's
+  own observation that the page is usable around 6s in practice suggests
+  15s is already a comfortable margin, made explicit rather than
+  implicit.
+
+Verified: the full `STEP_PROGRESS` round-trip was tested against the
+real running extension via CDP, not just read for plausibility — sent an
+actual message to the real background service worker, confirmed
+`run.progressLabel` was stored and retrievable via `GET_STATE`, then
+confirmed the popup's real `render()` function displays it correctly in
+the running view. Confirmed clean extension load (zero console errors)
+across background/popup/options/both content-script contexts. **Still
+not live-re-tested against a real account.**
+
 ## v10: "regression" investigated — a397024 provably innocent
 
 Right after v9 shipped, Toey re-tested the analyze step and hit the

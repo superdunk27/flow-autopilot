@@ -121,8 +121,23 @@ function updateRunButton() {
 
 document.getElementById('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage());
 
-runBtn.addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: FA_MSG.START_RUN, payload: { productImageDataUrl: selectedImageDataUrl } });
+// Every chrome.runtime.sendMessage call below now checks the response
+// and logs to console on an unexpected shape — belt-and-suspenders
+// diagnosability, not the primary fix (see README "v11"): background.js
+// itself now always writes a failure to run state (visible via the
+// normal error view) for any throw in these message handlers, so this
+// is a secondary safety net for genuinely unexpected cases (e.g. the
+// message never reaching background at all), not the only place an
+// error can surface.
+function logIfUnexpected(label, response) {
+  if (!response || response.ok === false) {
+    console.error('[Flow Autopilot popup]', label, 'returned an error:', response);
+  }
+}
+
+runBtn.addEventListener('click', async () => {
+  const res = await chrome.runtime.sendMessage({ type: FA_MSG.START_RUN, payload: { productImageDataUrl: selectedImageDataUrl } });
+  logIfUnexpected('START_RUN', res);
 });
 
 ['cancelBtn', 'cancelBtn2', 'cancelBtn3'].forEach((id) => {
@@ -131,8 +146,9 @@ runBtn.addEventListener('click', () => {
   });
 });
 
-document.getElementById('retryBtn').addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: FA_MSG.RETRY_STEP });
+document.getElementById('retryBtn').addEventListener('click', async () => {
+  const res = await chrome.runtime.sendMessage({ type: FA_MSG.RETRY_STEP });
+  logIfUnexpected('RETRY_STEP', res);
 });
 
 document.getElementById('newRunBtn').addEventListener('click', () => {
@@ -145,10 +161,11 @@ document.getElementById('reviewContinueBtn').addEventListener('click', async () 
   document.querySelectorAll('#reviewFields textarea').forEach((ta) => {
     fields[ta.dataset.field] = ta.value;
   });
-  chrome.runtime.sendMessage({
+  const res = await chrome.runtime.sendMessage({
     type: FA_MSG.CONFIRM_STEP,
     payload: { step: run.currentStep, fields },
   });
+  logIfUnexpected('CONFIRM_STEP', res);
 });
 
 const STEP_LABELS = {
@@ -244,6 +261,20 @@ function render(run) {
   if (run.status === 'running') {
     showView('running');
     document.getElementById('runningLabel').textContent = STEP_LABELS[run.currentStep] || 'กำลังทำงาน…';
+    // Live progress from the content script (added 2026-09-15, see
+    // README "v11") — a long but legitimate wait (e.g. a large real
+    // photo taking a while to upload) otherwise looks identical to
+    // something silently stuck, since nothing here changed at all
+    // before. run.progressLabel is best-effort and may be absent/stale
+    // (e.g. right when a new step starts, before its first update
+    // arrives) — hidden rather than shown blank in that case.
+    const progressEl = document.getElementById('progressLabel');
+    if (run.progressLabel) {
+      progressEl.textContent = run.progressLabel;
+      progressEl.hidden = false;
+    } else {
+      progressEl.hidden = true;
+    }
     updateStuckHint();
     return;
   }
