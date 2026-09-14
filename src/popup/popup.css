@@ -52,6 +52,20 @@ h1 {
   gap: 8px;
 }
 
+/* Real bug found live 2026-09-15 (see README "v19"): every view section
+ * showed simultaneously on every popup open (running + review + error +
+ * done all stacked in one page). Root cause was CSS, not JS: showView()
+ * in popup.js correctly sets el.hidden = true/false on every view every
+ * time, but `.view` and the browser's built-in `[hidden] { display:
+ * none }` rule have equal specificity (0,1,0 each) — at a tie, the
+ * later-cascading author stylesheet (this file) wins over the
+ * user-agent default, so `.view`'s `display: flex` silently overrode
+ * `hidden`'s own styling. The `hidden` attribute was being set
+ * correctly the whole time; it just never visually did anything. */
+.view[hidden] {
+  display: none;
+}
+
 .fileDrop {
   border: 1px dashed #999;
   border-radius: 6px;

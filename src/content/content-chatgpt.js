@@ -601,6 +601,7 @@
       type: FA_MSG.STEP_DONE,
       step: FA_STEPS.ANALYZE,
       ok: true,
+      runId: payload.runId,
       payload: { raw, ...parsed, warnings },
     });
   }
@@ -619,13 +620,14 @@
       type: FA_MSG.STEP_DONE,
       step: FA_STEPS.IMAGEGEN,
       ok: true,
+      runId: payload.runId,
       payload: { imageDataUrl, warnings },
     });
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type !== FA_MSG.RUN_CHATGPT_STEP) return undefined;
-    const { mode } = message.payload;
+    const { mode, runId } = message.payload;
     const run = mode === FA_STEPS.ANALYZE ? runAnalyze(message.payload) : runImageGen(message.payload);
     run
       .then(() => sendResponse({ ok: true }))
@@ -635,6 +637,7 @@
           type: FA_MSG.STEP_DONE,
           step: mode,
           ok: false,
+          runId,
           error: FA_UTILS.serializeError(err),
         });
         sendResponse({ ok: false, error: String(err.message || err) });

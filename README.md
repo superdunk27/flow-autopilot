@@ -13,6 +13,62 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v19: two fixes — stale-UI CSS bug, and a real runId gap QA caught in v18's recovery
+
+Two independent issues, both closed in this round.
+
+**1. Stale UI blocks, found live by Aree**: opening the popup fresh
+(before even clicking Run) showed *every* view section simultaneously —
+"กำลังทำงาน…", the review textareas, "ลองใหม่ขั้นนี้"/"ยกเลิก", **and**
+"✅ เสร็จแล้ว!" with a Google Flow link, all stacked on one page. The
+done/link content was confirmed leftover from an earlier, fully-
+completed run, not the run just being tested — reproduced on every
+popup open, predating this session's fixes entirely (not a regression
+from anything in v11–v18).
+
+Root cause was CSS, not JS: `popup.js`'s `showView()` correctly sets
+`el.hidden = true/false` on every view, every single call — that logic
+was never wrong. But `.view { display: flex; ... }` in `popup.css` and
+the browser's built-in `[hidden] { display: none }` rule have **equal
+specificity** (0,1,0 each); at a tie, the author stylesheet (this
+file) wins over the user-agent default, so `.view`'s `display: flex`
+was silently overriding `hidden`'s own styling on every view section.
+The `hidden` attribute was being toggled correctly the entire time —
+it just never visually did anything. Fixed with a more specific
+`.view[hidden] { display: none; }` rule (0,2,0), no `!important`
+needed. `#connectionErrorBanner`/`#warningsBanner` were never affected
+— their `.panel.warning` class doesn't set `display` at all, so
+nothing there competed with `[hidden]` in the first place.
+
+**2. QA's runId gap in v18's recoverLostStepDone()**: matching a
+recovered result against the active run by `status: 'running'` +
+`currentStep` alone isn't unique — every run starts at "analyze", so
+cancelling a run stuck there and immediately starting a genuinely
+different run (a different photo) would still "match" on both fields,
+silently grafting the old run's leftover result onto the new one.
+
+Fixed: every run now gets a `runId` (`crypto.randomUUID()`), generated
+once in `startAnalyzeStep()` — reused (not regenerated) across a retry
+of the same run via `existingRun?.runId`, so identity survives
+`RETRY_STEP`, but a genuinely new run (storage cleared by
+`CANCEL_RUN` first) always gets a fresh one. Threaded through every
+step's message payload (`RUN_CHATGPT_STEP`/`RUN_FLOW_STEP`) and back
+out through every `STEP_DONE` (success and error paths, all three
+steps) so `recoverLostStepDone()` can compare `runId` directly instead
+of inferring identity from shape alone.
+
+Also added, per QA's non-blocking note on the same review: an in-memory
+`recoveringLostStepDone` guard against two messages arriving close
+together both racing the `get()`-then-`remove()` gap in
+`recoverLostStepDone()` and double-processing the same entry — the
+storage `remove()` is still what makes this safe *across* service-
+worker restarts; this flag only covers the same-instance concurrent
+case QA flagged.
+
+**Not live-tested this round**: verified via `node --check` (all 3
+changed JS files) only; the CSS fix was diagnosed from the stylesheet
+directly (specificity math), not confirmed by re-rendering it live.
+
 ## v18: closed the loop on sendStepDone's own fallback — it was silently invisible too
 
 Toey's direct question, precisely on target: does `sendStepDone()`

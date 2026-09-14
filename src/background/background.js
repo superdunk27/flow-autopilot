@@ -235,6 +235,17 @@ const FLOW_STEP_CEILING_MS = 12 * 60 * 1000;
 
 async function startAnalyzeStep(productImageDataUrl) {
   const opts = await getOptions();
+  const existingRun = await getRun();
+  // Real gap found by QA reviewing 3ecb5dd's recovery mechanism (see
+  // README "v19"): matching a recovered faLostStepDone entry against
+  // the active run by status+currentStep alone isn't unique — every
+  // run starts at "analyze", so cancelling a run stuck there and
+  // immediately starting a *different* run (a different photo) would
+  // "match" and silently graft the old run's leftover result onto the
+  // new one. Reused (not regenerated) across a retry of the same run —
+  // only a genuinely new run (no existing run, e.g. right after
+  // CANCEL_RUN cleared storage) gets a fresh one.
+  const runId = existingRun?.runId || crypto.randomUUID();
   // No custom GPT required as of v2 — plain chatgpt.com new chat, with
   // the analysis instructions riding along as a user message instead of
   // a custom GPT's system prompt (free accounts can't create custom
@@ -244,6 +255,7 @@ async function startAnalyzeStep(productImageDataUrl) {
     status: FA_STATUS.RUNNING,
     currentStep: FA_STEPS.ANALYZE,
     productImageDataUrl,
+    runId,
     tabIds: { analyze: tabId },
     error: null,
     warnings: [],
@@ -259,6 +271,7 @@ async function startAnalyzeStep(productImageDataUrl) {
           stepLabel: FA_STEPS.ANALYZE,
           productImageDataUrl,
           promptText: `${opts.analyzeTemplate}\n\n${FA_ANALYZE_TRAILER}`,
+          runId,
         },
       }),
       CHATGPT_STEP_CEILING_MS,
@@ -298,6 +311,7 @@ async function startImageGenStep(storyboardPrompt) {
           stepLabel: FA_STEPS.IMAGEGEN,
           productImageDataUrl: run.productImageDataUrl,
           promptText: storyboardPrompt,
+          runId: run.runId,
         },
       }),
       CHATGPT_STEP_CEILING_MS,
@@ -329,6 +343,7 @@ async function startFlowStep(videoPrompt) {
         payload: {
           storyboardImageDataUrl: run.storyboardImageDataUrl,
           videoPrompt,
+          runId: run.runId,
         },
       }),
       FLOW_STEP_CEILING_MS,
@@ -374,22 +389,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
  * status: 'running' + currentStep) — a lost result from an abandoned/
  * cancelled run must never silently overwrite a newer one.
  */
+// Real gap found by QA reviewing 3ecb5dd (see README "v19"): matching a
+// recovered result by status+currentStep alone isn't unique — every run
+// starts at "analyze", so cancelling a run stuck there and immediately
+// starting a *different* run would "match" and silently graft the old
+// run's leftover result onto the new one. Every step now carries a
+// runId (generated once per run in startAnalyzeStep, reused across
+// retries/steps of the same run — see there), so recovery can compare
+// identity, not just shape.
+let recoveringLostStepDone = false;
+
 async function recoverLostStepDone() {
-  const { [FA_STORAGE_KEYS.LOST_STEP_DONE]: lost } = await chrome.storage.local.get(FA_STORAGE_KEYS.LOST_STEP_DONE);
-  if (!lost) return;
-  await chrome.storage.local.remove(FA_STORAGE_KEYS.LOST_STEP_DONE);
-  const run = await getRun();
-  if (!run || run.status !== FA_STATUS.RUNNING || run.currentStep !== lost.step) {
-    console.log('[Flow Autopilot] discarding a recovered STEP_DONE that no longer matches the active run (stale)', lost);
-    return;
+  // In-memory guard against overlapping calls within this one service-
+  // worker instance (e.g. two messages arriving close together) racing
+  // the get()-then-remove() gap below and both picking up the same
+  // entry — QA flagged this as real but non-blocking. The storage
+  // remove() itself is still what makes this safe *across* SW restarts;
+  // this flag only covers the same-instance concurrent case.
+  if (recoveringLostStepDone) return;
+  recoveringLostStepDone = true;
+  try {
+    const { [FA_STORAGE_KEYS.LOST_STEP_DONE]: lost } = await chrome.storage.local.get(FA_STORAGE_KEYS.LOST_STEP_DONE);
+    if (!lost) return;
+    await chrome.storage.local.remove(FA_STORAGE_KEYS.LOST_STEP_DONE);
+    const run = await getRun();
+    if (!run || run.status !== FA_STATUS.RUNNING || run.currentStep !== lost.step || run.runId !== lost.runId) {
+      console.log('[Flow Autopilot] discarding a recovered STEP_DONE that no longer matches the active run (stale)', {
+        lost,
+        currentRunId: run?.runId,
+        currentStatus: run?.status,
+        currentStep: run?.currentStep,
+      });
+      return;
+    }
+    console.log(
+      '[Flow Autopilot] recovering a STEP_DONE that failed to deliver live',
+      Math.round((Date.now() - lost.lostAt) / 1000),
+      's ago:',
+      lost
+    );
+    await handleStepDone(lost);
+  } finally {
+    recoveringLostStepDone = false;
   }
-  console.log(
-    '[Flow Autopilot] recovering a STEP_DONE that failed to deliver live',
-    Math.round((Date.now() - lost.lostAt) / 1000),
-    's ago:',
-    lost
-  );
-  await handleStepDone(lost);
 }
 
 async function handleMessage(message, sender) {

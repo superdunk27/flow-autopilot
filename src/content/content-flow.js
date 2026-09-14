@@ -200,6 +200,7 @@
       type: FA_MSG.STEP_DONE,
       step: STEP,
       ok: true,
+      runId: payload.runId,
       payload: { ...result, warnings },
     });
   }
@@ -214,6 +215,7 @@
           type: FA_MSG.STEP_DONE,
           step: STEP,
           ok: false,
+          runId: message.payload.runId,
           error: FA_UTILS.serializeError(err),
         });
         sendResponse({ ok: false, error: String(err.message || err) });
