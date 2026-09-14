@@ -13,6 +13,59 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v29: architecture-level bug — Agent has no Image/Video mode toggle, it infers intent
+
+🔴 Live-tested v28: every automated step worked exactly right — upload,
+"Add to prompt" (evidence-based fix confirmed working), prompt typed
+into the correct field, Generate clicked with no error. But the real
+result was a **new image** ("Nano Banana 2 Lite", the storyboard with
+timestamp labels baked in, laid out vertically) — not a video. Aree
+confirmed via the project's asset list (`asset type = Image`) and the
+model name shown at the bottom-right of the composer.
+
+Both Aree and Toey independently explored the live Flow UI to check
+whether a mode toggle was simply missed — confirmed there isn't one to
+find: the "Agent" chatbox has no Image/Video switch at all. The
+"Agent settings" panel (gear/sliders icon next to the composer) holds
+separate "Image generation default" (model: Nano Banana 2 Lite) and
+"Video generation default" (model: **Omni 1.1 Flash** — Google's
+renamed Veo) preferences, but these are just default *model choices*
+for whichever path gets used — Agent (an LLM) decides which underlying
+tool to invoke by interpreting the message content itself, not from
+any per-message toggle a user sets first. Opening the per-asset "edit"
+view for the wrongly-created image showed the exact prompt that was
+sent: "Animate the provided 5-panel ... storyboard into a 10-second
+video..." — phrasing that reads just as naturally as an *image*-editing
+instruction ("animate/transform this image") as a video-generation
+request, and Agent picked the former.
+
+This is why it was never caught before: every prior test failed
+*earlier* in the pipeline (selectors, timeouts, missing steps) — this
+is the first time the pipeline ever ran cleanly end-to-end far enough
+to expose it.
+
+**Fixed as a hypothesis, not yet quota-confirmed**: `content-flow.js`
+now prepends a fixed, blunt directive — `"Generate a video (not an
+image edit):\n\n"` — before the actual video prompt, rather than
+relying on the analyze template phrasing every future prompt exactly
+right on its own (directly what went wrong this time). Deliberately
+hardcoded in the extension, not left to ChatGPT's output wording.
+
+**Recommended before spending more automated-run quota**: test this
+specific hypothesis the cheapest way first — manually retype a
+modified prompt directly into the *already-open* Flow chat (the image
+is already attached there from the last run) rather than re-running
+the whole 3-step pipeline just to test this one thing. That's the
+fastest, lowest-cost way to learn whether an explicit directive
+actually flips Agent's routing before committing to this specific
+fix's wording, or exploring alternatives (a different phrasing, or
+further DOM investigation for a forced-model path neither Aree nor
+Toey found this round, if manual testing shows even an explicit
+directive still doesn't reliably work).
+
+**Not live-tested this round**: verified via `node --check` only, by
+explicit agreement — no quota spent on this fix's specific wording yet.
+
 ## v28: QA's fast pre-live-test catch — filtered newImagesSince() by visibility/size
 
 QA approved v27's evidence-based approach as fixing the right thing,

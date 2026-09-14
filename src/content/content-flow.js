@@ -353,10 +353,36 @@
     }
   }
 
+  // Real architecture-level bug found live 2026-09-15 (see README
+  // "v29"): Generate fired cleanly with no error, but produced a NEW
+  // IMAGE ("Nano Banana 2 Lite", an edited/relabeled copy of the
+  // storyboard with timestamp text baked in) instead of a video — the
+  // "Agent" chatbox has no explicit Image/Video mode toggle at all
+  // (confirmed live by both Aree and Toey independently exploring the
+  // real UI, including the "Agent settings" panel, which only holds
+  // separate Image-generation-default and Video-generation-default
+  // *model* preferences, not a per-message mode switch); Agent (an
+  // LLM) decides which underlying tool to invoke by interpreting the
+  // message itself. The actual sent prompt (ChatGPT's real v4 output)
+  // opened with "Animate the provided 5-panel ... storyboard into a
+  // 10-second video..." — phrasing that reads just as naturally as an
+  // *image*-editing instruction ("animate/transform this image") as it
+  // does a video-generation request, and Agent picked the former.
+  //
+  // Fix, flagged as a hypothesis pending live confirmation (this
+  // exact wording has NOT been quota-tested): prepend a short, blunt,
+  // unambiguous directive Agent's routing is more likely to key off of
+  // than inferring intent from the longer descriptive prompt alone.
+  // Deliberately a fixed line here (not relying on ChatGPT's analyze
+  // template to phrase every future prompt just right on its own,
+  // which is directly what went wrong this time).
+  const VIDEO_MODE_DIRECTIVE = 'Generate a video (not an image edit):\n\n';
+
   async function submitVideoPrompt(videoPrompt, warnings, evidenceImgs = []) {
     const promptField = await findPromptField(STEP, evidenceImgs);
     collectWarning(warnings, promptField, SEL.promptField, 'ช่องกรอก prompt');
-    FA_UTILS.typeIntoComposer(promptField, videoPrompt);
+    const fullPrompt = VIDEO_MODE_DIRECTIVE + videoPrompt;
+    FA_UTILS.typeIntoComposer(promptField, fullPrompt);
     await FA_UTILS.randomDelay(500, 1100);
 
     // NOTE (2026-09-15, see README "v27"): this only catches typing
@@ -368,7 +394,7 @@
     // real DOM evidence above — this is a narrower, honestly-scoped
     // safety net for a different failure mode, not a replacement for it.
     const landedText = (promptField.value ?? promptField.innerText ?? promptField.textContent ?? '').trim();
-    const expectedSnippet = videoPrompt.trim().slice(0, 15);
+    const expectedSnippet = fullPrompt.trim().slice(0, 15);
     if (!landedText || (expectedSnippet && !landedText.includes(expectedSnippet))) {
       throw new FASelectorError({
         step: STEP,
