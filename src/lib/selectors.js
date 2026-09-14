@@ -96,8 +96,24 @@
         'button[aria-label="Add photos & files" i]',
         'button[aria-haspopup="menu"][aria-label*="add" i]',
       ],
-      // Searched with FA_UTILS.findByVisibleText, not matched directly —
-      // this is the set of tags that plausibly render a menu item.
+      // Real bug (2026-09-14): the old code searched the WHOLE document
+      // for text matching /create image/i without first confirming a
+      // menu had actually opened — a real user saw the "+" click do
+      // nothing visible, yet the code proceeded as if it had clicked
+      // "Create image", meaning it matched and clicked some unrelated
+      // element still mounted (but not actually shown) elsewhere in the
+      // DOM. Now required: wait for this container to actually appear
+      // before searching inside it for the menu item. Standard ARIA
+      // pattern for an open dropdown, not site-specific — should be
+      // fairly durable. NOTE: the real plusMenuButton DOM (confirmed
+      // live, v5 round) carries an `interestfor` attribute — part of the
+      // emerging HTML "Interest Invokers" spec for hover-triggered
+      // popovers — so this menu may need a hover sequence, not just a
+      // click, to actually open; content-chatgpt.js now tries both.
+      menuContainer: ['[role="menu"]'],
+      // Searched with FA_UTILS.findByVisibleText, scoped to menuContainer
+      // once confirmed open (not matched directly, and no longer
+      // document-wide — see menuContainer comment above).
       menuItemTags: '[role="menuitem"], [role="menuitemradio"], button, div',
       // Shown while ChatGPT is still generating a response. NOT yet
       // confirmed against real DOM (during the 2026-09-14 live test the

@@ -13,6 +13,78 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v9: root-caused a real image-gen bug (not just another retry)
+
+**v8 confirmed working**: Toey's next real-account run passed the
+analyze step 100% — full, correct 3-section response for a real product
+("Deo KLEAR Mineral Deodorant Roll On Skin Rescue"), matching the v3
+template exactly. `waitForPageReady()` + the attach retry were the right
+fix.
+
+New bug, this time in the image-gen step: Toey observed the "+" button
+get clicked but *nothing else happened* — no menu visibly opened, no
+"Create image" ever got clicked, and the pipeline eventually failed with
+an `attachmentPreview not found (after 2 attempts)` error — a different
+failure surfacing symptoms of an *earlier* one. Since that error only
+fires after `enterCreateImageMode()` returns without throwing, tracing
+back: the function must have believed it successfully clicked
+"Create image," even though nothing visible happened.
+
+Root cause, found by code audit rather than adding another blind retry
+(the retry mechanism from v8 was confirmed working as designed — it
+retried twice, both attempts failed the same way, because the real
+problem was upstream of what it was retrying): the old
+`enterCreateImageMode()` searched the *entire document* for text
+matching `/create image/i` right after clicking "+", without ever
+confirming a menu had actually opened. `FA_UTILS.findByVisibleText`'s
+visibility check was also too shallow — it only checked an element's own
+`getBoundingClientRect()` and `visibility` CSS property, not whether an
+*ancestor* clipped or hid it. Portal/animation-based menu component
+libraries commonly keep menu item elements mounted in the DOM at all
+times (for animation purposes) even while the menu is visually closed,
+hidden via an ancestor's `display:none` or similar — exactly the kind of
+hiding the old check couldn't see through. So the search very plausibly
+matched a closed menu's dormant "Create image" item elsewhere in the DOM
+and clicked it — doing nothing observable, matching exactly what Toey
+saw, while the code believed it had succeeded.
+
+Fixed two ways, both verified against real Chrome (not just read for
+plausibility):
+
+1. **`FA_UTILS.isReallyVisible()`/`findByVisibleText()` now use
+   `Element.checkVisibility()`** (a real Chrome 105+ API that walks
+   ancestors — `display:none`, `visibility:hidden`, zero-opacity, etc. —
+   properly), falling back to the old shallow check only on engines
+   without it. **Verified with a constructed real-DOM test**: built an
+   actual hidden ancestor wrapping a "Create image" text node (simulating
+   a closed portal-based menu) alongside a real, visible one with
+   identical text, both in a live Chrome tab via CDP — confirmed the old
+   bug pattern (`getBoundingClientRect` alone) would have matched the
+   hidden one, and the new check correctly skips it and finds the real
+   one instead.
+2. **`enterCreateImageMode()` now confirms a real `[role="menu"]`
+   container exists before searching it at all** (`tryOpenPlusMenu()`),
+   and scopes the "Create image" search to *inside* that confirmed-open
+   container — structurally ruling out matching anything elsewhere on
+   the page, not just hoping the visibility check catches every case.
+   Also tries a hover event sequence (`pointerenter`/`mouseenter`/
+   `mouseover`) before a second click attempt if the first click doesn't
+   open anything: the real `plusMenuButton` DOM (confirmed live, v5
+   round) carries an `interestfor` attribute — part of the emerging HTML
+   "Interest Invokers" spec for hover-triggered popovers — so a bare
+   click may not be the right trigger at all. If the menu still never
+   opens after both attempts, the error now says so explicitly
+   ("เมนูไม่เปิดเลยหลังลองทั้งคลิกและ hover") instead of the old, misleading
+   "menu item not found" phrasing that reads as a text/selector problem
+   when the real issue is the menu never opening in the first place.
+
+**Not yet live-re-tested against a real account** — same caveat as v8:
+this round is a code-level root-cause fix based on Aree's precise
+observation ("+" clicked, nothing happened, retry proven not to help),
+verified as thoroughly as possible without a live session (real-DOM
+`checkVisibility()` test, clean extension load via CDP), but the actual
+image-gen step hasn't been re-run live yet.
+
 ## v8: regression fix — page-readiness timing (v7 exposed it)
 
 Toey's real-account testing of the v7 fix hit a new symptom immediately:
@@ -479,20 +551,26 @@ fully unattended run once you trust the split.
 
 ## Known limitations / what has NOT been verified
 
-Updated after the v5 live-DOM round (see above) — most of ChatGPT's
-selectors are now genuinely confirmed, not guessed. What's still open:
+Updated through v9 — the analyze step is now fully confirmed working
+end-to-end on a real account (v5, re-confirmed after the v8 fix). What's
+still open:
 
 - **ChatGPT `stopGeneratingButton` and `generatedImage`** — not yet
   confirmed. During the v5 test the send button visibly changed to a
   stop icon while generating, but its real testid/aria-label wasn't
-  queried before generation finished; the image-gen step itself never
-  ran (blocked by ChatGPT's free-tier image-chat rate limit — see "v5").
-- **`plusMenuButton`** — the button itself is confirmed real
-  (`button[data-testid="composer-plus-btn"]`, real DOM query), but
-  clicking through to the "Create image" menu item was not click-tested
-  this round (rate-limited before reaching that step). If it's wrong,
-  it'll surface as a clear, specific "selector not found" error — never
-  a silent skip of Create Image mode.
+  queried before generation finished; the image-gen step itself hasn't
+  completed live yet (blocked by the free-tier rate limit in v5, then by
+  the "+" menu bugs fixed in v8/v9).
+- **`plusMenuButton`/`menuContainer`** — `plusMenuButton` itself is
+  confirmed real (`button[data-testid="composer-plus-btn"]`, real DOM
+  query). `menuContainer` (`[role="menu"]`) is a standard ARIA pattern,
+  not site-specific, but not yet confirmed against ChatGPT's actual
+  markup — v9's fix (see above) is structurally sound and verified with
+  a constructed real-DOM visibility test, but the full click-through
+  (does `[role="menu"]` really appear, does "Create image" really render
+  inside it) hasn't been confirmed live yet. If it's wrong, it'll now
+  surface as a specific "เมนูไม่เปิดเลย" error rather than a silent
+  wrong-element click.
 - **Google Flow — still only partially confirmed.** `newProjectButton`
   (real finding: no aria-label at all, text-match only), the domain
   itself, and — as of v6 — the full 2-click upload path

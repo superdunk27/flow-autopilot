@@ -19,17 +19,69 @@
     }
   }
 
+  /** Fires a hover-style event sequence on `el` — pointerenter,
+   * mouseenter, mouseover — in addition to whatever click happens
+   * separately. See enterCreateImageMode for why. */
+  function dispatchHoverSequence(el) {
+    el.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  }
+
+  /**
+   * Tries to open the "+" menu and returns its confirmed-open container,
+   * or null if it never appeared after trying both a click and a hover
+   * sequence. Does not throw — enterCreateImageMode decides what a null
+   * result means.
+   */
+  async function tryOpenPlusMenu(plusBtn, step) {
+    plusBtn.click();
+    await FA_UTILS.randomDelay(400, 800);
+    try {
+      return await FA_UTILS.waitFor(SEL.menuContainer, { step, description: 'เมนูที่เปิดจากปุ่ม "+"', timeoutMs: 4000 });
+    } catch (_) {
+      // Real DOM (confirmed live, v5 round) carries an `interestfor`
+      // attribute on this button — part of the emerging HTML "Interest
+      // Invokers" spec for hover-triggered popovers. A bare click may
+      // simply not be the right trigger; retry with an explicit hover
+      // sequence before a fresh click.
+      dispatchHoverSequence(plusBtn);
+      await FA_UTILS.sleep(400);
+      plusBtn.click();
+      await FA_UTILS.randomDelay(400, 800);
+      try {
+        return await FA_UTILS.waitFor(SEL.menuContainer, {
+          step,
+          description: 'เมนูที่เปิดจากปุ่ม "+" (ลองรอบ 2 — hover แล้วค่อยคลิก)',
+          timeoutMs: 4000,
+        });
+      } catch (__) {
+        return null;
+      }
+    }
+  }
+
   /**
    * Enters ChatGPT's "Create image" mode via the composer's "+" menu.
    * Per real-account testing (2026-09-13), the image-gen step needs this
    * explicit step — just typing an image request as plain text on a
    * fresh chat isn't enough to reliably trigger image generation.
-   * UNVERIFIED against live DOM (no authenticated session was reachable
-   * this round — see README "Known limitations"): plusMenuButton is a
-   * best-effort aria-label guess, but the menu item itself is found by
-   * its actual visible text ("Create image") via findByVisibleText,
-   * which is far more resilient to markup changes than guessing a
-   * data-testid/class for it would be.
+   *
+   * Rewritten after a real regression (2026-09-14): the previous version
+   * searched the *whole document* for text matching /create image/i
+   * without first confirming a menu had actually opened. A real user saw
+   * the "+" click produce no visible effect, yet the code proceeded as
+   * if "Create image" had been clicked — meaning it matched and clicked
+   * some element still mounted elsewhere in the DOM (portal/animation-
+   * based menu libraries commonly keep menu items in the DOM even while
+   * closed) rather than the real, visible menu item. Root-caused, not
+   * just retried: now (1) confirms a real `[role="menu"]` container
+   * actually appears before searching it at all — trying both a click
+   * and a hover sequence, since the button's real DOM carries an
+   * `interestfor` attribute suggesting hover may be the actual trigger
+   * — and (2) scopes the "Create image" text search to *inside* that
+   * confirmed-open container, which structurally rules out matching
+   * anything elsewhere on the page.
    */
   async function enterCreateImageMode(step, warnings) {
     const plusBtn = await FA_UTILS.waitFor(SEL.plusMenuButton, {
@@ -37,23 +89,34 @@
       description: 'ปุ่ม "+" เปิดเมนู attachment/tools',
     });
     collectWarning(warnings, plusBtn, SEL.plusMenuButton, 'ปุ่ม "+"');
-    plusBtn.click();
-    await FA_UTILS.randomDelay(400, 800);
 
-    // Poll for the "Create image" menu item by visible text rather than
-    // a single waitFor call, since the menu itself may take a moment to
-    // render after the click.
+    const menuContainer = await tryOpenPlusMenu(plusBtn, step);
+    if (!menuContainer) {
+      throw new FASelectorError({
+        step,
+        description: 'เมนู attachment/tools ไม่เปิดเลยหลังลองทั้งคลิกและ hover ปุ่ม "+"',
+        selectorsTried: SEL.menuContainer,
+        siteHint:
+          'ปุ่ม "+" มี attribute interestfor ซึ่งอาจแปลว่าเมนูเปิดด้วยกลไกอื่นที่ยังไม่ครอบคลุม — ' +
+          'เปิด DevTools บนหน้าจริง ลองคลิก/hover ปุ่มเองดูว่าเมนูเปิดอย่างไร แล้วปรับ tryOpenPlusMenu() ให้ตรง',
+      });
+    }
+
+    // Poll within the confirmed-open menu only — never the whole
+    // document — since the menu's content may render a moment after the
+    // container itself appears.
     const start = Date.now();
     let menuItem = null;
     while (!menuItem && Date.now() - start < 8000) {
-      menuItem = FA_UTILS.findByVisibleText(SEL.menuItemTags, [/create image/i]);
+      menuItem = FA_UTILS.findByVisibleText(SEL.menuItemTags, [/create image/i], { root: menuContainer });
       if (!menuItem) await FA_UTILS.sleep(250);
     }
     if (!menuItem) {
       throw new FASelectorError({
         step,
-        description: 'เมนู "Create image" (หลังกดปุ่ม +)',
-        selectorsTried: [`${SEL.menuItemTags} matching text /create image/i`],
+        description: 'รายการ "Create image" ภายในเมนูที่เปิดจากปุ่ม "+"',
+        selectorsTried: [`${SEL.menuItemTags} matching text /create image/i, scoped inside the confirmed-open menu`],
+        siteHint: 'เมนูเปิดจริงแล้ว แต่หาข้อความ "Create image" ไม่เจอข้างใน — ชื่อ/ตำแหน่งในเมนูอาจเปลี่ยนไป เปิด DevTools ดู DOM จริงของเมนู',
       });
     }
     menuItem.click();

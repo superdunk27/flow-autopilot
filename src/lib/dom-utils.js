@@ -170,15 +170,38 @@
    * Returns null (does not throw) if nothing matches; callers decide
    * whether that's fatal.
    */
+  /**
+   * True visibility check, not just "this element's own box is
+   * non-zero" — a real bug (2026-09-14) traced back to exactly this
+   * gap: portal/animation-based menu libraries often keep menu item
+   * elements mounted in the DOM with a real non-zero own size even
+   * while the menu is closed (an *ancestor* clips/hides them via
+   * display:none, a collapsed max-height, aria-hidden, etc.), so the
+   * old own-rect-only check could report a closed menu's item as
+   * "visible" and click it — doing nothing observable, which is exactly
+   * what got reported. Element.checkVisibility() (Chrome 105+) actually
+   * walks ancestors; falls back to the old shallow check on engines
+   * without it rather than throwing.
+   */
+  function isReallyVisible(el) {
+    if (typeof el.checkVisibility === 'function') {
+      try {
+        return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+      } catch (_) {
+        // fall through to the shallow check below
+      }
+    }
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+  }
+
   function findByVisibleText(tagSelector, textPatterns, { root: searchRoot = document } = {}) {
     const patterns = Array.isArray(textPatterns) ? textPatterns : [textPatterns];
     const candidates = Array.from(searchRoot.querySelectorAll(tagSelector));
     for (const el of candidates) {
       const text = (el.innerText || el.textContent || '').trim();
       if (!text) continue;
-      const rect = el.getBoundingClientRect();
-      const visible = rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== 'hidden';
-      if (!visible) continue;
+      if (!isReallyVisible(el)) continue;
       if (patterns.some((re) => re.test(text))) return el;
     }
     return null;
@@ -364,6 +387,7 @@
     waitFor,
     isLastResortMatch,
     findByVisibleText,
+    isReallyVisible,
     isEnabled,
     waitForEnabled,
     softWaitFor,
