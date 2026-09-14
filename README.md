@@ -13,6 +13,82 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v15: popup buttons going silently dead when the service worker won't wake
+
+Aree's next live test (real photo, Plus account, commit fc10cfd)
+clicking Run mid-way through a still-running previous attempt: the
+pipeline restarted at "analyze" as expected, but progress froze at
+`[analyze] ChatGPT ตอบเสร็จแล้ว กำลังตรวจสอบผลลัพธ์…` for over a minute.
+`chrome://extensions` showed the service worker as **(Inactive)** the
+whole time. Clicking "ยกเลิก" or "Run" in the popup did *nothing at
+all* — verified rigorously: click listeners genuinely attached
+(`getEventListeners` showed `Array(1)` on every button), calling
+`.click()` directly via DevTools ran to completion with no exception,
+`chrome.runtime.lastError` was `undefined`, no console output of any
+kind appeared, no new entry in `chrome://extensions/?errors=...`, and
+the service worker stayed Inactive afterward — no sign it ever woke to
+process anything.
+
+Checked live with the same VNC access (`chrome://extensions` directly):
+confirmed the Inactive state and the small error badge on the
+extension's icon first-hand. Clicking the "service worker (Inactive)"
+inspect link *did* wake it successfully (label flipped to active,
+stayed alive while DevTools was attached) — its console showed a clean
+startup with no error, which rules out a top-level crash in the v13
+keepalive code (e.g. `chrome.alarms` being undefined) as the cause of
+the Inactive state itself. Getting a stable, correctly-scoped screenshot
+of the woken SW's own console reliably enough to read further (e.g.
+confirm whether `alarms.getAll()` shows the keepalive firing) hit
+repeated window-manager/coordinate issues in this VNC session and was
+not fully resolved this round — flagged rather than papered over.
+
+That still leaves the actual question open — Aree's specific report is
+about **why chrome.runtime.sendMessage() from the popup doesn't wake
+the service worker at all**, when MV3 documents this as one of the two
+guaranteed wake events (alongside alarms). Not resolved with certainty
+this round. But reading `popup.js` end to end found a real, separate,
+confirmed bug that exactly explains the *symptom* Aree described —
+"clicked, nothing happened anywhere, no console output visible" —
+regardless of what's ultimately keeping the service worker down:
+
+**Every popup button called `chrome.runtime.sendMessage()` directly,
+awaited with no `try/catch` anywhere in the file.** If that promise
+*rejects* (which it does when the service worker is genuinely
+unreachable), the rejection had nowhere to go but an unhandled promise
+rejection in the **popup's own** JS context — not the service worker's,
+which is why checking the SW's console/errors page found nothing. MV3
+popups close the instant they lose focus, and Chrome's console buffer
+for a closed window goes with it — unless DevTools happens to already
+be pinned open on that specific popup (not something a normal user, or
+even a tester working across multiple browser windows, reliably does),
+that rejection is realistically never seen by anyone. This is the same
+"totally silent, no console anywhere" signature Aree described,
+independent of the deeper service-worker-wake mystery.
+
+**Fixed**: new `sendToBackground(label, message)` helper in `popup.js`
+wraps every `chrome.runtime.sendMessage()` call (all button handlers,
+plus `getRun()`/`init()` which had the same gap — an unhandled
+rejection there could leave the *entire popup* stuck on whatever the
+static HTML shows with no explanation at all, a more severe variant of
+the same bug) in a real `try/catch`. On failure, it shows a **visible
+banner directly in the popup's own DOM** (`#connectionErrorBanner`) —
+survives exactly as long as the popup itself stays open, no console or
+external inspection needed — naming the actual error and suggesting the
+standard remedy: reload the unpacked extension via `chrome://extensions`
+(the well-known fix for a service worker stuck in an unresponsive state
+during active development). This does not fix *why* the service worker
+became unresponsive to messages — that remains an open question — but
+it fixes the silent-failure symptom regardless of the cause, and turns
+"nothing happens" into an actionable, visible next step for whoever
+hits it live.
+
+**Not live-tested this round**: verified via `node --check` only,
+and via live (but ultimately inconclusive on the deeper question)
+`chrome://extensions` inspection. The next live run reproducing this
+should watch for the new banner directly, and Aree's suggestion of a
+clean extension reload after a stuck SW is the fastest way to test
+whether that alone restores normal operation, independent of this fix.
+
 ## v14: sidestepped the "+" menu entirely — chatgpt.com/images route
 
 Good news first: **analyze step confirmed 100% working end to end**, live,

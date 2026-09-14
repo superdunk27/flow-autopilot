@@ -121,51 +121,84 @@ function updateRunButton() {
 
 document.getElementById('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage());
 
-// Every chrome.runtime.sendMessage call below now checks the response
-// and logs to console on an unexpected shape — belt-and-suspenders
-// diagnosability, not the primary fix (see README "v11"): background.js
-// itself now always writes a failure to run state (visible via the
-// normal error view) for any throw in these message handlers, so this
-// is a secondary safety net for genuinely unexpected cases (e.g. the
-// message never reaching background at all), not the only place an
-// error can surface.
-function logIfUnexpected(label, response) {
-  if (!response || response.ok === false) {
-    console.error('[Flow Autopilot popup]', label, 'returned an error:', response);
+// Real bug found live 2026-09-14 (see README "v15"): every button here
+// used to call chrome.runtime.sendMessage() directly, awaited with no
+// try/catch. If that promise *rejects* — which it does when the service
+// worker is genuinely unreachable, e.g. stuck Inactive and not waking on
+// a new message — the rejection had nowhere to go but an unhandled
+// promise rejection in the popup's own JS context. MV3 popups close the
+// instant they lose focus, taking their console buffer with them, so
+// that rejection was realistically never seen by anyone — clicking a
+// button did visibly nothing at all, exactly the silent-failure class
+// this project explicitly exists to avoid. sendToBackground() below
+// makes that failure land in the DOM itself instead, where it survives
+// as long as the popup stays open and needs no console to be watched.
+const connectionErrorBanner = document.getElementById('connectionErrorBanner');
+
+function showConnectionError(label, err) {
+  connectionErrorBanner.hidden = false;
+  connectionErrorBanner.textContent =
+    `⚠️ ส่งคำสั่ง "${label}" ไปหา extension ไม่สำเร็จ (${err && err.message ? err.message : err}) — ` +
+    `service worker อาจค้าง/ไม่ตอบสนอง ลองเปิด chrome://extensions แล้วกดปุ่ม reload (⟳) ที่การ์ด Flow Autopilot แล้วลองใหม่`;
+}
+
+function clearConnectionError() {
+  connectionErrorBanner.hidden = true;
+  connectionErrorBanner.textContent = '';
+}
+
+/**
+ * Sends `message` to background.js, surfacing a *visible* error in the
+ * popup (not just console) if the message can't even be delivered —
+ * returns null in that case instead of throwing, so callers don't also
+ * need their own try/catch. Also checks the response shape on success
+ * (see README "v11") as a secondary safety net.
+ */
+async function sendToBackground(label, message) {
+  let res;
+  try {
+    res = await chrome.runtime.sendMessage(message);
+  } catch (err) {
+    console.error('[Flow Autopilot popup]', label, 'failed to reach background:', err);
+    showConnectionError(label, err);
+    return null;
   }
+  clearConnectionError();
+  if (!res || res.ok === false) {
+    console.error('[Flow Autopilot popup]', label, 'returned an error:', res);
+  }
+  return res;
 }
 
 runBtn.addEventListener('click', async () => {
-  const res = await chrome.runtime.sendMessage({ type: FA_MSG.START_RUN, payload: { productImageDataUrl: selectedImageDataUrl } });
-  logIfUnexpected('START_RUN', res);
+  await sendToBackground('START_RUN', { type: FA_MSG.START_RUN, payload: { productImageDataUrl: selectedImageDataUrl } });
 });
 
 ['cancelBtn', 'cancelBtn2', 'cancelBtn3'].forEach((id) => {
-  document.getElementById(id).addEventListener('click', () => {
-    chrome.runtime.sendMessage({ type: FA_MSG.CANCEL_RUN });
+  document.getElementById(id).addEventListener('click', async () => {
+    await sendToBackground('CANCEL_RUN', { type: FA_MSG.CANCEL_RUN });
   });
 });
 
 document.getElementById('retryBtn').addEventListener('click', async () => {
-  const res = await chrome.runtime.sendMessage({ type: FA_MSG.RETRY_STEP });
-  logIfUnexpected('RETRY_STEP', res);
+  await sendToBackground('RETRY_STEP', { type: FA_MSG.RETRY_STEP });
 });
 
-document.getElementById('newRunBtn').addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: FA_MSG.CANCEL_RUN });
+document.getElementById('newRunBtn').addEventListener('click', async () => {
+  await sendToBackground('CANCEL_RUN', { type: FA_MSG.CANCEL_RUN });
 });
 
 document.getElementById('reviewContinueBtn').addEventListener('click', async () => {
   const run = await getRun();
+  if (!run) return; // getRun() already showed the connection-error banner
   const fields = {};
   document.querySelectorAll('#reviewFields textarea').forEach((ta) => {
     fields[ta.dataset.field] = ta.value;
   });
-  const res = await chrome.runtime.sendMessage({
+  await sendToBackground('CONFIRM_STEP', {
     type: FA_MSG.CONFIRM_STEP,
     payload: { step: run.currentStep, fields },
   });
-  logIfUnexpected('CONFIRM_STEP', res);
 });
 
 const STEP_LABELS = {
@@ -300,14 +333,21 @@ function render(run) {
 }
 
 async function getRun() {
-  const { run } = await chrome.runtime.sendMessage({ type: FA_MSG.GET_STATE });
-  return run;
+  const res = await sendToBackground('GET_STATE', { type: FA_MSG.GET_STATE });
+  return res ? res.run : null;
 }
 
 async function init() {
-  const { run } = await chrome.runtime.sendMessage({ type: FA_MSG.GET_STATE });
+  // Same connection-failure gap as the button handlers above, but more
+  // consequential here: an uncaught rejection in init() (no .catch() on
+  // its call at the bottom of this file) would leave the whole popup
+  // stuck on whatever the static HTML shows by default — no visible
+  // error, and reviewContinueBtn/etc. reading getRun() later would
+  // silently see nothing either. sendToBackground() surfaces the same
+  // visible banner here instead of failing invisibly at startup.
+  const res = await sendToBackground('GET_STATE', { type: FA_MSG.GET_STATE });
   updateRunButton();
-  render(run);
+  render(res ? res.run : null);
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
