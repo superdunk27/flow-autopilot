@@ -60,36 +60,118 @@
     await FA_UTILS.randomDelay(500, 1000);
   }
 
+  /**
+   * ChatGPT is a heavy SPA — the content script fires at document_idle,
+   * which only guarantees the initial page load event happened, not
+   * that React has finished hydrating (attaching real event handlers to
+   * elements that already exist in the DOM). A real regression
+   * (2026-09-14, see README "v8") hit exactly this: attachmentPreview
+   * failed from the very first check, before any typing/sending —
+   * Toey's own real-account testing observed no attachment chip ever
+   * appearing, consistent with the file-attach step running against a
+   * not-yet-interactive page rather than the selector itself being
+   * wrong. Waits for composer + the "+" button to both exist, then
+   * requires them to still be present after a settle delay (catches an
+   * early skeleton render getting replaced by the real one) before
+   * anything else touches the page.
+   */
+  async function waitForPageReady(step) {
+    await FA_UTILS.waitFor(SEL.composer, {
+      step,
+      description: 'ช่องพิมพ์ข้อความ (composer) — รอหน้าเว็บโหลดพร้อมใช้งานก่อนเริ่ม',
+    });
+    await FA_UTILS.waitFor(SEL.plusMenuButton, {
+      step,
+      description: 'ปุ่ม "+" — รอหน้าเว็บโหลดพร้อมใช้งานก่อนเริ่ม',
+    });
+    await FA_UTILS.sleep(1500);
+    const stillPresent = (list) => list.some((sel) => {
+      try {
+        return !!document.querySelector(sel);
+      } catch (_) {
+        return false;
+      }
+    });
+    if (!stillPresent(SEL.composer) || !stillPresent(SEL.plusMenuButton)) {
+      // Page re-rendered during the settle window (hydration replaced an
+      // early skeleton) — wait once more for things to exist again.
+      await FA_UTILS.waitFor(SEL.composer, {
+        step,
+        description: 'ช่องพิมพ์ข้อความ (composer) — หน้าเว็บ re-render ระหว่างรอ',
+      });
+      await FA_UTILS.sleep(1000);
+    }
+  }
+
+  /**
+   * Attaches the product image and verifies it actually took, retrying
+   * once with a fresh file-input lookup and a longer settle delay if the
+   * first attempt's attachmentPreview check fails — the retry is the
+   * direct fix for the "page wasn't interactive yet" regression above:
+   * re-querying the file input fresh (rather than reusing a possibly
+   * stale reference) and giving the page more time before trying again
+   * gives hydration a second chance to finish.
+   */
+  async function attachProductImage(step, productImageDataUrl, warnings) {
+    const MAX_ATTEMPTS = 2;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const fileInput = await FA_UTILS.waitFor(SEL.fileInput, {
+          step,
+          description: 'ช่องแนบไฟล์ (file input) ของ ChatGPT',
+        });
+        collectWarning(warnings, fileInput, SEL.fileInput, 'ช่องแนบไฟล์');
+        const file = FA_UTILS.dataUrlToFile(productImageDataUrl, 'product.png');
+        await FA_UTILS.attachFileToInput(fileInput, file);
+
+        // REQUIRED gate, not optional — a real user hit exactly the
+        // failure this was previously soft about: the send button
+        // became enabled from having *text* alone, with no file
+        // actually attached, so the message went out with no image and
+        // ChatGPT replied asking for the photo (2026-09-14 bug report).
+        // button[aria-label^="Remove file"] was independently CONFIRMED
+        // live the same day (see README "v5") as the real "an
+        // attachment is present" indicator, so it's no longer an
+        // unverified guess — waiting on the send button becoming
+        // enabled is a *necessary* signal (composer is ready) but not a
+        // *sufficient* one (an attachment is actually there); this
+        // checks the sufficient condition explicitly instead of
+        // assuming it.
+        const attachmentChip = await FA_UTILS.waitFor(SEL.attachmentPreview, {
+          step,
+          description: 'ภาพตัวอย่างไฟล์แนบ (ยืนยันว่าอัปโหลดสำเร็จจริงก่อนพิมพ์/ส่ง)',
+          timeoutMs: 15000,
+        });
+        collectWarning(warnings, attachmentChip, SEL.attachmentPreview, 'ภาพตัวอย่างไฟล์แนบ');
+        return;
+      } catch (err) {
+        if (attempt < MAX_ATTEMPTS) {
+          warnings.push(
+            `⚠️ แนบไฟล์รอบที่ ${attempt} ไม่สำเร็จ (${(err.message || '').slice(0, 100)}) — ลองใหม่อีกครั้งหลังรอหน้าเว็บโหลดเพิ่ม`
+          );
+          await FA_UTILS.sleep(2500);
+          continue;
+        }
+        throw new FASelectorError({
+          step,
+          description: 'ภาพตัวอย่างไฟล์แนบ (หลังลอง 2 รอบ)',
+          selectorsTried: SEL.attachmentPreview,
+          siteHint:
+            'อาจไม่ใช่แค่ selector ผิด — เป็นไปได้ว่าหน้าเว็บยังโหลด/hydrate ไม่เสร็จตอนแนบไฟล์ครั้งแรก ' +
+            '(ChatGPT เป็น SPA ที่ใช้เวลาพร้อมใช้งานจริงหลัง document โหลดเสร็จ) ลองรันใหม่อีกครั้ง',
+        });
+      }
+    }
+  }
+
   async function attachAndSend({ step, mode, productImageDataUrl, promptText, warnings }) {
+    await waitForPageReady(step);
+
     if (mode === FA_STEPS.IMAGEGEN) {
       await enterCreateImageMode(step, warnings);
     }
 
-    const fileInput = await FA_UTILS.waitFor(SEL.fileInput, {
-      step,
-      description: 'ช่องแนบไฟล์ (file input) ของ ChatGPT',
-    });
-    collectWarning(warnings, fileInput, SEL.fileInput, 'ช่องแนบไฟล์');
-    const file = FA_UTILS.dataUrlToFile(productImageDataUrl, 'product.png');
-    await FA_UTILS.attachFileToInput(fileInput, file);
-
-    // REQUIRED gate, not optional — a real user hit exactly the failure
-    // this was previously soft about: the send button became enabled
-    // from having *text* alone, with no file actually attached, so the
-    // message went out with no image and ChatGPT replied asking for the
-    // photo (2026-09-14 bug report). button[aria-label^="Remove file"]
-    // was independently CONFIRMED live the same day (see README "v5") as
-    // the real "an attachment is present" indicator, so it's no longer
-    // an unverified guess — waiting on the send button becoming enabled
-    // is a *necessary* signal (composer is ready) but not a *sufficient*
-    // one (an attachment is actually there); this checks the sufficient
-    // condition explicitly instead of assuming it.
-    const attachmentChip = await FA_UTILS.waitFor(SEL.attachmentPreview, {
-      step,
-      description: 'ภาพตัวอย่างไฟล์แนบ (ยืนยันว่าอัปโหลดสำเร็จจริงก่อนพิมพ์/ส่ง)',
-      timeoutMs: 15000,
-    });
-    collectWarning(warnings, attachmentChip, SEL.attachmentPreview, 'ภาพตัวอย่างไฟล์แนบ');
+    await attachProductImage(step, productImageDataUrl, warnings);
     await FA_UTILS.randomDelay(500, 1100);
 
     const composer = await FA_UTILS.waitFor(SEL.composer, {

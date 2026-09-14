@@ -13,6 +13,60 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v8: regression fix — page-readiness timing (v7 exposed it)
+
+Toey's real-account testing of the v7 fix hit a new symptom immediately:
+`attachmentPreview` (now a required gate) failed to find *anything* from
+the very first check, right after the file-attach step — before any
+typing or sending happened at all. Toey observed no attachment chip ever
+appearing in the chat box, as if the page had "just loaded." His theory,
+which is what got fixed here: ChatGPT is a heavy SPA that keeps
+client-side rendering/hydrating well after the initial page load event,
+and the content script's file-attach step was very plausibly running
+*before* the page was actually interactive — finding a real DOM element
+via `querySelector`, but one whose React event handlers hadn't attached
+yet, so setting `.files` via `DataTransfer` and dispatching synthetic
+events never actually registered with the site's upload logic. Not a
+selector problem — a timing one, and the v7 fix (correctly) just made
+the previously-silent version of this exact failure visible instead of
+hidden.
+
+Fixed three ways, matching the three things Aree asked to check:
+
+1. **`waitForPageReady()`** now runs first, before anything else in
+   `attachAndSend` (including entering Create Image mode for the
+   image-gen step) — waits for the composer *and* the "+" button to both
+   exist, then requires them to still be present after a settle delay,
+   re-waiting once more if the page re-rendered during that window
+   (catching an early skeleton getting replaced by the real thing).
+   `document_idle` only guarantees the load event fired, not that a
+   heavy SPA has finished hydrating — there's no clean DOM signal for
+   "React has attached its listeners," so this is a best-effort
+   settle-and-recheck rather than a hard guarantee, but it directly
+   targets the theorized root cause.
+2. Yes — the "+" button click in `enterCreateImageMode` now happens
+   *after* `waitForPageReady()`, not before it, for the same reason.
+3. **`attachProductImage()` retries once** on failure: re-locates a
+   *fresh* file input reference (rather than reusing a possibly-stale
+   one from before a hydration pass), waits longer, and tries the
+   whole attach-and-verify sequence again — this is what actually
+   recovers from "the page wasn't ready the first time." Only if the
+   retry also fails does it throw, and the final error's `siteHint` now
+   explicitly names page-readiness/timing as a likely cause alongside
+   selector drift, rather than only reading as "this selector is wrong"
+   (which is what made the v7 regression's real cause less obvious than
+   it needed to be).
+
+Verified: `node --check` on the changed file, confirmed the extension's
+background service worker and content-script isolated world still load
+without errors via CDP (same technique as every prior round).
+**Not yet re-tested against a real ChatGPT account** — Toey hadn't had a
+chance to grab the full error stack or re-test by the time this was
+fixed (only the `console.error(...)` call site, line 316, was available
+as a location reference); this round's fix is based on code-level
+analysis of a highly plausible, well-evidenced theory, not a live
+repro-and-confirm cycle like v5–v7 had.
+
 ## v7: fixed a real blocking bug — sent messages with no image attached
 
 Real bug report from Toey's own testing (with screenshot evidence): the
