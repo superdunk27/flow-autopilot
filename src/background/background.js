@@ -8,6 +8,49 @@ importScripts('../lib/messages.js');
 const RUN_KEY = FA_STORAGE_KEYS.RUN;
 const OPT_KEY = FA_STORAGE_KEYS.OPTIONS;
 
+// ---- toolbar icon -> full tab (not the default transient action-popup) --
+
+// Real bug found live 2026-09-15 (see README "v42") — reproduced 100%
+// via VNC, confirmed by Aree: clicking the toolbar icon opens
+// popup.html as Chrome's default transient action-popup, which
+// auto-closes the instant it loses focus (standard Chrome behavior,
+// not a bug in this codebase). Clicking "เลือกรูปสินค้า..." opens the
+// native GTK file picker, which steals focus from the popup — closing
+// it the moment the user clicks "Select", discarding everything with
+// no visible error at all ("ไม่มีอะไรเกิดขึ้นเลย"). This was never
+// caught earlier this session because every verification opened
+// popup.html directly as a plain tab (which doesn't auto-close on
+// blur) instead of going through the real toolbar-icon entry point.
+//
+// Fixed the entry point itself rather than trying to make a transient
+// popup survive a native file dialog stealing focus (not something
+// this extension can control) — manifest.json's action.default_popup
+// removed, so chrome.action.onClicked fires instead (it only fires
+// when no default_popup is set) and opens popup.html as a real tab,
+// exactly the path this whole session already verified works
+// correctly with a native file picker in the way.
+let popupTabId = null;
+
+chrome.action.onClicked.addListener(async () => {
+  if (popupTabId !== null) {
+    try {
+      const tab = await chrome.tabs.get(popupTabId);
+      await chrome.tabs.update(popupTabId, { active: true });
+      await chrome.windows.update(tab.windowId, { focused: true });
+      return;
+    } catch (_) {
+      // Tab was closed since — fall through and open a fresh one.
+      popupTabId = null;
+    }
+  }
+  const tab = await chrome.tabs.create({ url: chrome.runtime.getURL('src/popup/popup.html') });
+  popupTabId = tab.id;
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === popupTabId) popupTabId = null;
+});
+
 // ---- storage helpers ---------------------------------------------------
 
 async function getRun() {

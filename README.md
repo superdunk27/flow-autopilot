@@ -13,6 +13,49 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v42: 🐛 real toolbar-icon bug — the action-popup auto-closes on the native file picker
+
+Aree reproduced Toey's real report 100% via VNC: click the toolbar
+icon → "Flow Autopilot" → click "เลือกรูปสินค้า..." → the native GTK
+file picker opens → click "Select" → **the popup vanishes entirely,
+with no visible error, nothing selected** — exactly "ไม่มีอะไรเกิดขึ้นเลย".
+
+Root cause, confirmed not a code bug: Chrome's default `action`
+popup (opened via `manifest.json`'s `action.default_popup`) is a
+transient window that auto-closes the instant it loses focus — this
+is standard Chrome behavior, not something this extension's code
+controls. The native file picker steals focus from the popup the
+moment it opens, so the popup is gone by the time the user clicks
+"Select," discarding everything silently.
+
+This was never caught earlier this session because every single
+round of verification opened `popup.html` directly as a plain browser
+tab (which doesn't auto-close on blur) instead of going through the
+real toolbar-icon entry point — the actual pipeline logic (v11
+template included) was never broken; only the way real end-users
+reach the UI was.
+
+**Fixed the entry point itself**, since a transient popup surviving a
+native file dialog stealing focus isn't something this extension can
+control: removed `manifest.json`'s `action.default_popup` (so
+`chrome.action.onClicked` fires instead — it only fires when no
+default popup is set) and added a click handler in `background.js`
+that opens `popup.html` as a real tab via `chrome.tabs.create()` —
+exactly the path this whole session already verified works correctly
+with a native file picker in the way. Tracks the opened tab's ID (no
+new permissions needed — deliberately avoids `chrome.tabs.query()`,
+which needs the `tabs` permission or a matching host permission to
+filter by URL) so a repeat click on the icon focuses the existing tab
+instead of opening duplicates.
+
+`popup.html`/`popup.css`/`popup.js` themselves are unchanged — Aree's
+own extensive verification already confirmed this exact UI works
+correctly as a plain tab throughout the session; only the manifest and
+the new click handler in `background.js` changed.
+
+**Not live-tested this round**: verified via `node --check` and a
+JSON validation of `manifest.json` only.
+
 ## v41: v11 template — clarify doodles should still move even when the camera doesn't
 
 v10 (and earlier) said Shot 1/5 use "a completely static camera with
