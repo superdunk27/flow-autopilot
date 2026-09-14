@@ -116,8 +116,19 @@
     return new Set(document.querySelectorAll('img'));
   }
 
+  // QA caught this (2026-09-15, see README "v28") before Aree spent
+  // real quota testing it: no visibility/size filter at all meant a
+  // hidden-but-not-removed leftover (e.g. the asset picker's own
+  // thumbnail preview, still in the DOM just hidden after the picker
+  // closes) could get counted as "new" evidence — a decoy that could
+  // sit closer to the wrong field than the real, visible thumbnail
+  // does, silently corrupting commonAncestorDistance()'s pick. Same
+  // loaded/visible filter as waitForGeneratedImage() on the ChatGPT
+  // side.
   function newImagesSince(before) {
-    return Array.from(document.querySelectorAll('img')).filter((img) => !before.has(img));
+    return Array.from(document.querySelectorAll('img'))
+      .filter((img) => !before.has(img))
+      .filter((img) => FA_UTILS.isReallyVisible(img) && img.complete && img.naturalWidth > 100);
   }
 
   async function uploadStoryboardImage(storyboardImageDataUrl, warnings) {

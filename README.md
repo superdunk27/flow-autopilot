@@ -13,6 +13,27 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v28: QA's fast pre-live-test catch — filtered newImagesSince() by visibility/size
+
+QA approved v27's evidence-based approach as fixing the right thing,
+but caught one small gap fast, before Aree spent real quota:
+`newImagesSince()` had no visibility/size filter at all — a
+hidden-but-not-removed leftover (e.g. the asset picker's own thumbnail
+preview, still in the DOM just hidden after the picker closes) could
+get counted as "new" evidence, potentially sitting closer to the wrong
+field than the real, visible thumbnail and silently corrupting
+`commonAncestorDistance()`'s pick — undermining the whole point of
+v27's fix with one overlooked filter.
+
+**Fixed**: `newImagesSince()` now also requires
+`FA_UTILS.isReallyVisible(img) && img.complete && img.naturalWidth > 100`
+— the same loaded/visible filter already used by
+`waitForGeneratedImage()` on the ChatGPT side, applied here for the
+same reason.
+
+**Not live-tested this round**: verified via `node --check` only.
+Aree is live-testing right after this lands.
+
 ## v27: QA caught a tautological check — real DOM-evidence-based fix instead
 
 QA's final review of b0ba5c4 found the "verify-after-type" check from
