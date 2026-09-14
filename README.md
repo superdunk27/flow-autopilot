@@ -13,6 +13,51 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v35: v5 template — theme-based shots, per-shot voice-over, strict product-lock directive
+
+After testing 3 products (Deo KLEAR, Old Spice, RUN9PRO), Toey noticed
+v4's fixed "5 different pedestals, same camera" formula produced the
+same pedestal set repeating for every product — the real reference
+example instead varies the *theme* per shot (with camera angle
+adapting to that theme, not just the base), plus a separate per-shot
+voice-over.
+
+`FA_ANALYZE_TEMPLATE` replaced with the v5 spec text from
+`ψ/active/flow-autopilot-extension.md` "Update 2026-09-14 v5", copied
+verbatim per the spec's explicit instruction — verified **byte-for-byte**
+via the same Python diff method used for v2–v4 (`in_file == spec` →
+`True`, 5942/5942 chars).
+
+Section 1's shot-line format changed: `Shot N: [pedestal] — [camera] —
+[text]` (v3/v4) → `Shot N: [theme] — [camera treatment] — text:
+"[main]" / "[secondary]" — voice: "[line]"` (v5), using 5 fixed themes
+in order (product overview / material & texture / design & details /
+use occasion / closing CTA). **Checked explicitly, per the spec's own
+request**: read `parseAnalysisResponse()` in full — it only ever splits
+by the 3 SECTION-level headings and keeps each section as one text
+block; it never parses individual "Shot N:" lines or extracts
+sub-fields from them. This format change needed **no code changes** —
+confirmed by reading the actual parsing code, not assumed from the
+spec's description of it.
+
+Section 3 gained a permanent "CRITICAL: strict reference-image-
+conditioned generation" directive (live-confirmed via RUN9PRO to fix a
+real product-mismatch problem seen with Old Spice) and per-theme
+camera motion (static for hero/closing shots, subtle push-in for the
+macro shot, slow rotation for the design-detail shot, natural motion
+for the use-occasion shot) replacing v4's fully-static-every-scene
+rule, plus a voice directive telling Omni 1.1 Flash to narrate each
+shot's voice line itself. Toey decided against automating Google
+Flow's "Voices" tab for this — `content-flow.js` is unaffected, no
+changes there.
+
+All 3 section headings confirmed byte-identical to v3/v4 via
+programmatic diff against the v4 commit, not eyeballed.
+
+**Not live-tested this round**: `node --check` confirms the file
+parses; the real test is the next live analyze run producing the new
+theme-based shot lines and voice-over lines as intended.
+
 ## v34: v33's core sequence manually verified live; renamed for what it actually does
 
 Aree manually walked through v33's exact sequence against the real
