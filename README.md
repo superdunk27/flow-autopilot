@@ -13,6 +13,73 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v16: keepalive upgraded to a persistent port; STEP_DONE made retry-safe
+
+Answering Aree's direct question: does the v13 alarm keepalive actually
+cover the "ตรวจสอบผลลัพธ์" phase? By scope, yes — `startKeepalive()`
+runs for the entire `withCeiling(sendMessageWithRetry(...))` await in
+`startAnalyzeStep()`, which doesn't resolve until the content script's
+whole `runAnalyze()` finishes, well past that phase. But Aree's live
+evidence says it didn't actually work: a fresh full-photo run got real
+content back from ChatGPT (confirmed visibly correct in the tab within
+~8s) — progress then froze at "ChatGPT ตอบเสร็จแล้ว กำลังตรวจสอบผลลัพธ์…"
+for over a minute, `chrome://extensions/?errors=` stayed completely
+empty, and the service worker was confirmed **(Inactive)** again at
+exactly that moment. No throw, no reject anywhere — execution just
+stopped, which given that evidence most likely means the alarm did not
+actually prevent idle-termination here. The most likely explanation is
+the exact caveat flagged (and left unconfirmed) back in v13: Chrome's
+`periodInMinutes` floor for packaged extensions may be silently clamping
+the alarm coarser than the ~30s idle window, making it far less
+effective than intended. Still not confirmed with certainty which
+Chrome-side mechanism is at fault — flagged as the leading hypothesis,
+not a proven fact.
+
+**Primary keepalive switched to a persistent port** (the fallback
+already named in v13): `startKeepalive(tabId)` now also opens a live
+`chrome.tabs.connect(tabId, {name: FA_KEEPALIVE_PORT_NAME})` for the
+whole step, accepted by a trivial `chrome.runtime.onConnect` listener in
+both content scripts. An open message channel is documented by Chrome
+as keeping a service worker alive for as long as it stays connected —
+no minimum-period ambiguity at all, unlike alarms. The alarm from v13 is
+kept running alongside it (belt-and-suspenders + its console.debug tick
+still helps diagnose), not removed.
+
+**Separately, and just as important**: reading `content-chatgpt.js` and
+`content-flow.js` end to end found the exact mechanism that turns "the
+service worker briefly went idle mid-step" into "a fully completed real
+result is silently discarded forever" — the same class of bug already
+found and fixed in `popup.js` (v15), not yet fixed here. Every step's
+final `STEP_DONE` message (the single most important message in the
+whole pipeline — the actual finished result) was a bare, un-awaited,
+uncaught `chrome.runtime.sendMessage()`, in both the success path *and*
+the error-catch path, in all three of `runAnalyze()`, `runImageGen()`,
+and Flow's `run()`. If the service worker is unreachable at that exact
+instant, the rejection has nowhere to go — no `FASelectorError`/
+`FATimeoutError` is ever thrown, `chrome://extensions/?errors=` stays
+clean, and the popup just stops, matching Aree's evidence exactly.
+
+**Fixed**: new `sendStepDone(message)` in both content scripts retries
+delivery up to 4 times with backoff (1s/2s/3s) instead of firing once
+and hoping. If every attempt still fails, the result is written directly
+to `chrome.storage.local` (key `faLostStepDone`, content scripts can
+write storage directly too) as a last-resort fallback, so a real
+completed result is recoverable by hand instead of destroyed outright.
+**Honest limit, not glossed over**: `background.js` does not yet
+automatically read or recover from that key — this is a manual-recovery
+escape hatch for now, not full auto-recovery. Wiring that up (matching
+it to the currently active run, handling the case where a newer run has
+since started) is real additional design work, left as an explicit
+follow-up rather than rushed in under this fix.
+
+**Not live-tested this round**: verified via `node --check` across all
+4 changed files only. The next live run reproducing this should show
+either the port keepalive actually preventing the Inactive state this
+time, or — if it still goes Inactive — the retried STEP_DONE delivery
+getting the real result through anyway once the SW wakes back up within
+the ~7s retry window, or, worst case, a recoverable entry in
+`chrome.storage.local.faLostStepDone` instead of silent loss.
+
 ## v15: popup buttons going silently dead when the service worker won't wake
 
 Aree's next live test (real photo, Plus account, commit fc10cfd)

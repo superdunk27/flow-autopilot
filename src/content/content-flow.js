@@ -11,6 +11,40 @@
   const GENERATE_TEXT_PATTERNS = [/^generate$/i, /generate video/i, /create video/i];
   const NEW_PROJECT_TEXT_PATTERNS = [/new project/i];
 
+  // Same keepalive-port acceptance as content-chatgpt.js — see README "v16".
+  chrome.runtime.onConnect.addListener((port) => {
+    if (port.name !== FA_KEEPALIVE_PORT_NAME) return;
+  });
+
+  // Same retry+fallback STEP_DONE delivery as content-chatgpt.js — see
+  // that file's sendStepDone() doc comment and README "v16" for why a
+  // bare fire-and-forget sendMessage for this specific message is a real
+  // silent-failure risk, not a theoretical one.
+  async function sendStepDone(message) {
+    const MAX_ATTEMPTS = 4;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        await chrome.runtime.sendMessage(message);
+        return;
+      } catch (err) {
+        console.error('[Flow Autopilot] STEP_DONE delivery attempt', attempt, 'of', MAX_ATTEMPTS, 'failed:', err);
+        if (attempt < MAX_ATTEMPTS) await FA_UTILS.sleep(1000 * attempt);
+      }
+    }
+    console.error(
+      '[Flow Autopilot] STEP_DONE could not be delivered after',
+      MAX_ATTEMPTS,
+      'attempts — writing result to chrome.storage.local (key:',
+      FA_STORAGE_KEYS.LOST_STEP_DONE,
+      ') as a fallback instead of discarding it'
+    );
+    try {
+      await chrome.storage.local.set({ [FA_STORAGE_KEYS.LOST_STEP_DONE]: { ...message, lostAt: Date.now() } });
+    } catch (_) {
+      // best-effort only — nothing further to fall back to
+    }
+  }
+
   function collectWarning(warnings, el, selectorList, label) {
     if (FA_UTILS.isLastResortMatch(el, selectorList)) {
       warnings.push(
@@ -162,7 +196,7 @@
     await uploadStoryboardImage(payload.storyboardImageDataUrl, warnings);
     await submitVideoPrompt(payload.videoPrompt, warnings);
     const result = await waitForVideo();
-    chrome.runtime.sendMessage({
+    await sendStepDone({
       type: FA_MSG.STEP_DONE,
       step: STEP,
       ok: true,
@@ -174,9 +208,9 @@
     if (message.type !== FA_MSG.RUN_FLOW_STEP) return undefined;
     run(message.payload)
       .then(() => sendResponse({ ok: true }))
-      .catch((err) => {
+      .catch(async (err) => {
         console.error('[Flow Autopilot]', err);
-        chrome.runtime.sendMessage({
+        await sendStepDone({
           type: FA_MSG.STEP_DONE,
           step: STEP,
           ok: false,

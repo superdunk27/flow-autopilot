@@ -111,24 +111,51 @@ function withCeiling(promise, ms, description) {
 // specifically because those are the *unreliable* ones in a service
 // worker per Chrome's own docs; alarms are the documented exception.
 //
-// Caveat, flagged honestly rather than assumed: Chrome clamps
-// periodInMinutes to a 1-minute floor for packaged/Web-Store extensions;
-// this project is currently unpacked/dev-only (see README "Install"),
-// where sub-1-minute alarms are commonly permitted, but that has not
-// been live-confirmed in this Chrome build. If live testing shows the
-// alarm is silently clamped to 1 minute (too coarse vs. the ~30s idle
-// window), the next fallback is a persistent chrome.runtime.connect()
-// port with periodic pings instead, which has no such minimum-period
-// ambiguity.
+// UPDATE 2026-09-15 (see README "v16"): the caveat above turned out to
+// matter live, not just in theory. A fresh run got past "ChatGPT ตอบเสร็จ
+// แล้ว" — real content confirmed visible in the tab — but the popup froze
+// with zero errors anywhere (chrome://extensions/?errors= stayed empty),
+// and the service worker was confirmed (Inactive) again at exactly the
+// moment progress stopped. No throw, no reject — execution just stopped,
+// consistent with the alarm not actually preventing idle-termination
+// during this step, most likely because periodInMinutes silently got
+// clamped coarser than the ~30s idle window (never live-confirmed either
+// way — see v13). Switched the *primary* mechanism to the persistent-port
+// technique flagged as the fallback back then: a live chrome.tabs.connect()
+// port to the step's own tab has no minimum-period ambiguity at all —
+// Chrome documents an open message channel as keeping the service worker
+// alive for as long as it stays connected, independent of any timer.
+// The alarm is kept running alongside it (belt-and-suspenders, and it
+// still self-diagnoses via its console.debug tick), not removed.
 const KEEPALIVE_ALARM_NAME = 'fa-keepalive';
 const KEEPALIVE_PERIOD_MINUTES = 0.4; // ~24s, under the ~30s idle threshold
 
-function startKeepalive() {
+let keepalivePort = null;
+
+function startKeepalive(tabId) {
   chrome.alarms.create(KEEPALIVE_ALARM_NAME, { periodInMinutes: KEEPALIVE_PERIOD_MINUTES });
+  try {
+    keepalivePort = chrome.tabs.connect(tabId, { name: FA_KEEPALIVE_PORT_NAME });
+    keepalivePort.onDisconnect.addListener(() => {
+      keepalivePort = null;
+    });
+  } catch (err) {
+    // Best-effort — the alarm above still provides some protection even
+    // if the port fails to open (e.g. the tab closed already).
+    console.error('[Flow Autopilot] keepalive port failed to open', err);
+  }
 }
 
 function stopKeepalive() {
   chrome.alarms.clear(KEEPALIVE_ALARM_NAME);
+  if (keepalivePort) {
+    try {
+      keepalivePort.disconnect();
+    } catch (_) {
+      // already disconnected (e.g. the tab/content script went away)
+    }
+    keepalivePort = null;
+  }
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -166,7 +193,7 @@ async function startAnalyzeStep(productImageDataUrl) {
     warnings: [],
     progressLabel: null,
   });
-  startKeepalive();
+  startKeepalive(tabId);
   try {
     await withCeiling(
       sendMessageWithRetry(tabId, {
@@ -205,7 +232,7 @@ async function startImageGenStep(storyboardPrompt) {
     error: null,
     progressLabel: null,
   });
-  startKeepalive();
+  startKeepalive(tabId);
   try {
     await withCeiling(
       sendMessageWithRetry(tabId, {
@@ -238,7 +265,7 @@ async function startFlowStep(videoPrompt) {
     error: null,
     progressLabel: null,
   });
-  startKeepalive();
+  startKeepalive(tabId);
   try {
     await withCeiling(
       sendMessageWithRetry(tabId, {

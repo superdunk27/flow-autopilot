@@ -20,9 +20,25 @@
     STEP_PROGRESS: 'FA_STEP_PROGRESS',
   };
 
+  // chrome.tabs.connect()/chrome.runtime.onConnect port name for the
+  // persistent-connection service-worker keepalive (see README "v16").
+  // A live, open port is documented by Chrome as keeping an MV3 service
+  // worker alive for as long as it stays open — used as the *primary*
+  // keepalive mechanism, alongside (not instead of) the chrome.alarms
+  // one from v13, since alarms' periodInMinutes has an ambiguous
+  // real-world minimum this project hasn't been able to confirm.
+  root.FA_KEEPALIVE_PORT_NAME = 'fa-keepalive-port';
+
   root.FA_STORAGE_KEYS = {
     RUN: 'faRun',
     OPTIONS: 'faOptions',
+    // Last-resort fallback for a STEP_DONE message that failed to reach
+    // background.js even after retries (see README "v16") — the
+    // content script writes the lost result here directly so a fully
+    // completed real result is never silently discarded, even though
+    // background.js does not yet automatically recover from this key
+    // (a manual-recovery escape hatch for now, not full auto-recovery).
+    LOST_STEP_DONE: 'faLostStepDone',
   };
 
   root.FA_STEPS = {

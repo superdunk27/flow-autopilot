@@ -35,6 +35,58 @@
     }
   }
 
+  // Accepts the keepalive port background.js opens for the duration of a
+  // step (see README "v16" / background.js's startKeepalive) — nothing
+  // needs to happen here beyond accepting the connection; the mere
+  // existence of a live, open port to this tab is what Chrome documents
+  // as keeping the service worker alive, independent of any timer.
+  chrome.runtime.onConnect.addListener((port) => {
+    if (port.name !== FA_KEEPALIVE_PORT_NAME) return;
+  });
+
+  /**
+   * Sends the step's final result to background.js, retrying with
+   * backoff instead of the bare fire-and-forget sendMessage this used to
+   * be. Real bug found live 2026-09-15 (see README "v16"): a fully
+   * completed, real result (ChatGPT's actual reply, visibly correct in
+   * the tab) never reached background.js at all — the service worker was
+   * confirmed (Inactive) at that exact moment, and nothing threw or
+   * rejected anywhere, because this call was never awaited or caught in
+   * the first place. This is the single most important message in the
+   * whole pipeline; silently losing it discards real, finished work with
+   * zero visible signal. If every attempt still fails (e.g. the SW is
+   * genuinely gone and won't wake), the result is written directly to
+   * chrome.storage.local as a last-resort fallback — content scripts can
+   * write storage directly too — so it is at least recoverable by hand
+   * rather than destroyed outright. background.js does not automatically
+   * read this key yet; it's a manual-recovery escape hatch for now, not
+   * full auto-recovery (flagged, not silently promised as complete).
+   */
+  async function sendStepDone(message) {
+    const MAX_ATTEMPTS = 4;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        await chrome.runtime.sendMessage(message);
+        return;
+      } catch (err) {
+        console.error('[Flow Autopilot] STEP_DONE delivery attempt', attempt, 'of', MAX_ATTEMPTS, 'failed:', err);
+        if (attempt < MAX_ATTEMPTS) await FA_UTILS.sleep(1000 * attempt);
+      }
+    }
+    console.error(
+      '[Flow Autopilot] STEP_DONE could not be delivered after',
+      MAX_ATTEMPTS,
+      'attempts — writing result to chrome.storage.local (key:',
+      FA_STORAGE_KEYS.LOST_STEP_DONE,
+      ') as a fallback instead of discarding it'
+    );
+    try {
+      await chrome.storage.local.set({ [FA_STORAGE_KEYS.LOST_STEP_DONE]: { ...message, lostAt: Date.now() } });
+    } catch (_) {
+      // best-effort only — nothing further to fall back to
+    }
+  }
+
   function collectWarning(warnings, el, selectorList, label) {
     if (FA_UTILS.isLastResortMatch(el, selectorList)) {
       warnings.push(
@@ -545,7 +597,7 @@
     checkForMissingImageReply(FA_STEPS.ANALYZE);
     const raw = extractLastAssistantText();
     const parsed = parseAnalysisResponse(raw);
-    chrome.runtime.sendMessage({
+    await sendStepDone({
       type: FA_MSG.STEP_DONE,
       step: FA_STEPS.ANALYZE,
       ok: true,
@@ -563,7 +615,7 @@
       timeoutMs: 60000,
     });
     const imageDataUrl = await FA_UTILS.elementImageToDataUrl(imgEl);
-    chrome.runtime.sendMessage({
+    await sendStepDone({
       type: FA_MSG.STEP_DONE,
       step: FA_STEPS.IMAGEGEN,
       ok: true,
@@ -577,9 +629,9 @@
     const run = mode === FA_STEPS.ANALYZE ? runAnalyze(message.payload) : runImageGen(message.payload);
     run
       .then(() => sendResponse({ ok: true }))
-      .catch((err) => {
+      .catch(async (err) => {
         console.error('[Flow Autopilot]', err);
-        chrome.runtime.sendMessage({
+        await sendStepDone({
           type: FA_MSG.STEP_DONE,
           step: mode,
           ok: false,
