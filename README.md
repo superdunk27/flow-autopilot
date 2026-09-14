@@ -13,6 +13,38 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v31: check-then-set for the Video toggle — skip the click if already set
+
+Toey's suggestion: if this setting turns out to persist across
+projects/sessions (not confirmed either way — a real open question,
+not settled), force-clicking it every time wastes a click for no
+reason, and every extra click is one more chance at an
+accidental-trigger surprise like the "Agent" chip tangent. Proposed
+check-then-set instead of blind force-set.
+
+**Implemented for the Video/Image toggle only** (the one piece of this
+panel with a confirmed live selector): `setVideoGenerationMode()` now
+checks whether the "Video" toggle is already selected before clicking
+it — via the standard Angular Material `mat-button-toggle` checked-
+state conventions (`aria-pressed="true"`, or the `mat-button-toggle-
+checked` class on the toggle's host element). Reasonable to infer
+rather than guessed blind: `mat-button-toggle-button` itself is
+confirmed live as this site's real class, meaning it's a stock Angular
+Material component using the library's own standard conventions, not
+this site's custom naming. Defaults to clicking (the previous,
+unconditional behavior) if neither signal reads as checked — never
+silently skips based on an unconfirmed assumption.
+
+**Not extended to resolution/duration/count** (720p/10s/x1) — no
+selectors for those controls have been confirmed live at all yet
+(only the Video/Image toggle was), so there's nothing safe to check
+against; left untouched exactly as before (never explicitly set,
+relying on whatever default/persisted state exists), per Toey's own
+"not blocking, force-set is fine" allowance for anything too complex
+to do safely right now.
+
+**Not live-tested this round**: verified via `node --check` only.
+
 ## v30: 🎉🎉🎉 the real fix — an explicit per-message generation-type selector
 
 Toey found the actual root cause by hand: v29's directive-prefix

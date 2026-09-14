@@ -432,8 +432,29 @@
         siteHint: 'ถ้า panel เปลี่ยน DOM อีก ตรวจผ่าน DevTools แล้วปรับ findVideoToggle() ใน content-flow.js',
       });
     }
-    videoToggle.click();
-    await FA_UTILS.randomDelay(400, 800);
+    // Toey's suggestion (2026-09-15, see README "v31"): skip the click
+    // if "Video" is already the selected toggle — e.g. left over from
+    // a previous run in the same browser session, if this setting
+    // turns out to persist (not confirmed either way) — fewer
+    // unnecessary clicks means less exposure to the kind of
+    // accidental-trigger surprise hit while investigating the "Agent"
+    // chip. Checked via the standard Angular Material `mat-button-
+    // toggle` checked-state conventions (`aria-pressed`, and the
+    // `mat-button-toggle-checked` class on the toggle's host element)
+    // — reasonable to infer since `mat-button-toggle-button` itself is
+    // confirmed live as this site's real class, meaning it's a stock
+    // Angular Material component, not a guess specific to this site's
+    // own custom naming. Defaults to clicking (the previous,
+    // unconditional behavior) if neither signal is present or doesn't
+    // read as checked — never silently skips based on an unconfirmed
+    // assumption.
+    const alreadyChecked =
+      videoToggle.getAttribute('aria-pressed') === 'true' ||
+      videoToggle.closest('mat-button-toggle')?.classList.contains('mat-button-toggle-checked') === true;
+    if (!alreadyChecked) {
+      videoToggle.click();
+      await FA_UTILS.randomDelay(400, 800);
+    }
 
     // Close the panel before continuing — exact dismiss mechanism not
     // confirmed live (flagged explicitly, not assumed): using the
