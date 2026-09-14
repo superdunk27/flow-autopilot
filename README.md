@@ -13,6 +13,37 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v22: widened waitForGeneratedImage's timeout — v4's prompt genuinely takes longer
+
+Aree tested the v4 template live (eba1dd2 + 100550c) and hit the same
+`FASelectorError` at `waitForGeneratedImage()` again — but this time
+checked the real DOM *after* the error, by hand, and found the matching
+element existed with every condition satisfied (right URL pattern,
+`naturalWidth` 941, `closest()` correctly not `'user'`). Real evidence
+this was a timing gap, not a selector bug: generation was visibly
+taking over a minute with v4's longer, more detailed prompt (grid
+layout + gradient badges + gradient text + doodles) vs. v3's shorter,
+plainer one — and `waitForGeneratedImage()`'s budget was still the
+original 60s from before v4 shipped.
+
+**Fixed**: widened to 3 minutes (`GENERATED_IMAGE_TIMEOUT_MS`), with a
+one-time "still waiting, this may take longer than usual" progress
+report at the 45s mark so a real future stall is now distinguishable
+from this normal-for-v4 wait — matching the pattern already established
+for `attachProductImage()` in v10. Also widened `CHATGPT_STEP_CEILING_MS`
+in `background.js` from 8 to 12 minutes: with the 3-minute image-wait
+added on top of the existing 5-minute generation-wait (plus page-ready/
+attach/type overhead), imagegen's own realistic worst-case total is now
+close to 11 minutes — the old 8-minute ceiling was no longer
+"comfortably above" that, per its own doc comment, and could have fired
+on a genuinely still-working step. Since v4 is the permanent default
+template now (not a temporary edge case), sized this for the normal
+case going forward, not just to clear one test run.
+
+**Not live-tested this round**: verified via `node --check` only — the
+real confirmation is whether the next live imagegen run with v4
+completes within the new budget.
+
 ## v21: v4 template — badges/gradient text/doodles + 2-column grid layout
 
 Toey compared v3's actual output (once imagegen finally worked live —

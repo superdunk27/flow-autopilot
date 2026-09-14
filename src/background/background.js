@@ -226,11 +226,24 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // ---- pipeline steps -------------------------------------------------------
 
-// Ceilings comfortably above each step's own internal timeouts (5 min
-// generation-wait for chatgpt.com steps, 10 min for Flow's video), so a
+// Ceilings comfortably above each step's own internal timeouts, so a
 // step that's still genuinely working never trips this — it only fires
 // if the content script's response never arrives at all.
-const CHATGPT_STEP_CEILING_MS = 8 * 60 * 1000;
+//
+// CHATGPT_STEP_CEILING_MS widened 2026-09-15 (see README "v22"): for
+// imagegen specifically, the content script's own worst-case internal
+// budget is no longer just the 5-minute generation-wait — it's that
+// wait *plus* waitForGeneratedImage()'s own timeout (widened the same
+// round, to 3 min, after the v4 template's more complex prompt was
+// confirmed live to genuinely need more time than the old 60s budget).
+// Sequentially, page-ready + attach + type/send + 5min generation-wait
+// + 3min image-wait adds up to roughly 10-11 minutes worst case for
+// imagegen — the old 8-minute ceiling was no longer comfortably above
+// that, and could fire while the content script was still legitimately
+// working. Widened past FLOW_STEP_CEILING_MS's value, not because
+// imagegen is expected to take as long as a real video render, but to
+// keep real margin above the computed worst case above.
+const CHATGPT_STEP_CEILING_MS = 12 * 60 * 1000;
 const FLOW_STEP_CEILING_MS = 12 * 60 * 1000;
 
 async function startAnalyzeStep(productImageDataUrl) {

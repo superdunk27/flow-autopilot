@@ -641,14 +641,34 @@
    * reason findByVisibleText() exists instead of a selector for that
    * case.
    */
-  async function waitForGeneratedImage(step, { timeoutMs = 60000, pollMs = 250 } = {}) {
+  // Timeout sizing note (2026-09-15, see README "v22"): the original
+  // 60s budget was tuned before the v4 template shipped. Aree confirmed
+  // live that this was a real timing gap, not a selector bug — the
+  // matching image element existed with every condition satisfied
+  // (right URL pattern, naturalWidth 941, closest() correctly not
+  // 'user') when queried by hand shortly *after* the timeout had
+  // already fired, meaning generation genuinely just took longer than
+  // 60s, not that the element was wrong or missing. v4's prompt is
+  // substantially longer/more complex (grid layout + gradient badges +
+  // gradient text + doodles vs. v3's plain flat captions) and Aree
+  // observed generation clearly exceeding 60s, sometimes past a
+  // minute — and since v4 is now the permanent default template every
+  // user hits, not a temporary edge case, this needed a real margin,
+  // not a small bump. Same pattern as attachProductImage's widening in
+  // v10 for large real photos.
+  const GENERATED_IMAGE_TIMEOUT_MS = 3 * 60 * 1000;
+  const GENERATED_IMAGE_SLOW_HINT_MS = 45 * 1000;
+
+  async function waitForGeneratedImage(step, { timeoutMs = GENERATED_IMAGE_TIMEOUT_MS, pollMs = 250 } = {}) {
     const isCandidate = (img) => {
       const src = img.currentSrc || img.src || '';
       if (!/backend-api\/estuary\/content/.test(src) && !/oaiusercontent/.test(src)) return false;
       if (img.closest('[data-message-author-role="user"]')) return false; // the user's own uploaded photo
       return true;
     };
+    reportProgress(`[${step}] กำลังรอ ChatGPT สร้างภาพ storyboard…`);
     const start = Date.now();
+    let slowHintShown = false;
     for (;;) {
       const loaded = Array.from(document.querySelectorAll('img'))
         .filter(isCandidate)
@@ -657,14 +677,20 @@
         loaded.sort((a, b) => b.naturalWidth * b.naturalHeight - a.naturalWidth * a.naturalHeight);
         return loaded[0];
       }
-      if (Date.now() - start > timeoutMs) {
+      const elapsed = Date.now() - start;
+      if (!slowHintShown && elapsed > GENERATED_IMAGE_SLOW_HINT_MS) {
+        slowHintShown = true;
+        reportProgress(`[${step}] ยังรอภาพ storyboard อยู่ — prompt ที่ซับซ้อนขึ้นอาจใช้เวลานานกว่าปกติ…`);
+      }
+      if (elapsed > timeoutMs) {
         throw new FASelectorError({
           step,
           description: 'ภาพ storyboard ที่ ChatGPT สร้าง',
           selectorsTried: SEL.generatedImage,
           siteHint:
-            'เว็บอาจเปลี่ยน DOM อีกครั้ง — ตรวจ URL จริงของรูป (backend-api/estuary/content หรือ oaiusercontent) ' +
-            'และ closest(\'[data-message-author-role="user"]\') ผ่าน DevTools ว่ายังแยกรูป user/AI ได้ถูกไหม',
+            `รอนานกว่า ${Math.round(timeoutMs / 1000)} วิแล้วไม่เจอ — อาจเป็นเว็บเปลี่ยน DOM อีกครั้ง ` +
+            '(ตรวจ URL จริงของรูป backend-api/estuary/content หรือ oaiusercontent และ closest(\'[data-message-author-role="user"]\') ผ่าน DevTools) ' +
+            'หรือ ChatGPT generate ช้ากว่านี้จริงๆ (prompt ซับซ้อนมาก/โหลดหนัก) — ลองใหม่ก่อนสงสัย selector',
         });
       }
       await FA_UTILS.sleep(pollMs);
