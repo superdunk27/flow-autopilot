@@ -13,6 +13,32 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v38: v8 template — force per-scene crop, stop showing the raw grid as a scene
+
+Toey found live-generated videos were showing the raw uncropped
+5-panel storyboard grid image itself as a scene (especially Scene 1),
+instead of that scene's own single panel filling the frame.
+
+Single-clause insertion in Section 3, verified via a Python diff
+against the exact old/new sentence pair the spec gave (same discipline
+as v6→v7): inserts an explicit "CRITICAL — per-scene crop" instruction
+requiring every scene to show ONLY its own panel, tightly cropped and
+zoomed edge-to-edge — never the full multi-panel grid, not even
+briefly as an opening/establishing shot — with Scene 1 called out
+specifically as needing to already start cropped into panel 1's own
+hero framing rather than the raw grid image. Copied verbatim from
+`ψ/active/flow-autopilot-extension.md` "Update 2026-09-14 v8", same
+discipline as v2–v7.
+
+Every other sentence — Sections 1, 2, and the rest of Section 3
+including v7's text-lock CRITICAL paragraph — confirmed byte-identical
+to v7 via the same diff. All 3 section headings unchanged — no
+parse-code impact, same reasoning established since v5.
+
+**Not live-tested this round**: `node --check` confirms the file
+parses; the real test is the next live video generation checking
+whether scenes actually crop to their own panel now.
+
 ## v37: v7 template — stricter on-screen-text lock to stop cross-scene blending
 
 Toey generated a real video of a smartwatch (GOOJODOQ) with v6 and
