@@ -134,12 +134,34 @@
         '[data-message-author-role="assistant"]',
         'div[data-testid^="conversation-turn"] [data-message-author-role="assistant"]',
       ],
-      // Generated image inside the latest assistant message (image-gen
-      // chat). NOT yet confirmed — the image-gen step test was blocked
-      // this round by ChatGPT's free-tier "chats with files/images" rate
-      // limit (hit right after the analyze-step test — see README).
+      // PROVEN WRONG live 2026-09-15 (see README "v20") — ChatGPT
+      // switched image-serving domains from *.oaiusercontent.com to a
+      // same-origin `/backend-api/estuary/content?id=file_...`
+      // endpoint, which the user's own uploaded photo ALSO uses now —
+      // URL alone can no longer distinguish AI-generated from
+      // user-uploaded. Worse, the generated image is no longer nested
+      // under any [data-message-author-role] ancestor at all
+      // (closest() returns null — confirmed live via DevTools by
+      // Aree), so a plain CSS selector can't express the real
+      // discriminator either (which requires *excluding* an ancestor,
+      // not matching one). Actual matching logic now lives in
+      // content-chatgpt.js's waitForGeneratedImage() instead of a
+      // selector list — this array is kept only as a documented record
+      // of what's been tried/confirmed-wrong, and a plain-URL/className
+      // fallback reference for that function's error message.
+      // classNames seen on the 3 real generated-image <img> elements
+      // found live (a progressive-loading UI: multiple stacked
+      // elements for one image, not one element swapping src):
+      // "absolute top-0 z-1 w-full" and "absolute top-0 w-full" — vs.
+      // the user's own uploaded photo's very different, verbose
+      // className ("max-w-full object-cover object-center overflow-
+      // hidden rounded-[1.75rem] w-full h-full max-w-96 max-h-64 w-fit
+      // transition-opacity duration-300 opacity-100"). Utility-class
+      // strings like these are the most likely thing to drift again —
+      // treated as a secondary signal only, never the primary one.
       generatedImage: [
-        '[data-message-author-role="assistant"] img[src*="oaiusercontent"]',
+        'img[src*="backend-api/estuary/content"]',
+        'img[src*="oaiusercontent"]',
         '[data-message-author-role="assistant"] img[alt]',
       ],
     },

@@ -13,6 +13,59 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v20: real progress — analyze + imagegen both work end to end; fixed generatedImage DOM drift
+
+🎉 Big milestone: v11–v19's fixes (recovery, CSS, runId, keepalive, retry)
+all held up live — analyze completed cleanly and imagegen actually
+generated a real 5-panel storyboard image matching the Storyboard Plan,
+with progress updating the whole way (no more frozen popup). The next
+real bug hit was `SEL.generatedImage` failing to match the finished
+image at all.
+
+Aree diagnosed this live with real DevTools probing on the actual
+successful run (`querySelectorAll('img')` filtered by
+`naturalWidth > 100`, checked each candidate's `closest()`) — not
+guessed:
+
+1. **ChatGPT switched image-serving domains**: generated images are now
+   served from a same-origin `/backend-api/estuary/content?id=file_...`
+   endpoint, not `*.oaiusercontent.com`. `SEL.generatedImage`'s old URL
+   match broke outright.
+2. **URL alone can no longer distinguish AI-generated from user-
+   uploaded**: the user's own uploaded product photo *also* uses the
+   identical `backend-api/estuary/content` pattern now — confirmed live.
+3. **The generated image is no longer nested under any
+   `[data-message-author-role]` ancestor at all** — `closest()` returns
+   `null` (ChatGPT's UI renders it as an absolutely-positioned overlay
+   outside the normal reply-bubble flow now), while the user's own
+   uploaded photo's `closest()` still correctly resolves to `role="user"`.
+   This is the one reliable discriminator — excluding an ancestor,
+   which a plain CSS selector list can't express (there's no "NOT
+   nested under X" combinator usable here), the same reason
+   `findByVisibleText()` exists instead of a selector for its case.
+4. **3 `<img>` elements matched for one generated image** — a
+   progressive-loading UI (a blurred placeholder plus the final image
+   as separate stacked elements, not one element swapping its `src`) —
+   "the first match" isn't safe.
+
+**Fixed**: new `waitForGeneratedImage(step)` in `content-chatgpt.js`
+replaces the plain `waitFor(SEL.generatedImage, ...)` call — polls for
+`<img>` elements matching the URL pattern (either domain, for forward/
+backward compatibility) whose `closest('[data-message-author-role="user"]')`
+is falsy, filters to ones that are actually loaded
+(`img.complete && naturalWidth > 100`), and picks the largest by pixel
+area if more than one qualifies. `SEL.generatedImage` in `selectors.js`
+is kept as a documented record of what's been tried/proven-wrong plus a
+plain fallback reference for the error message, not the actual matching
+logic anymore. Aree's observed classNames (`"absolute top-0 z-1
+w-full"`/`"absolute top-0 w-full"` for generated vs. a much more
+verbose one for user-uploaded) are recorded as a secondary signal only —
+utility-class strings are the most likely thing to drift again, so the
+ancestor-role exclusion stays the primary discriminator.
+
+**Not live-tested this round**: verified via `node --check` only —
+Aree's next live imagegen run is what actually confirms this.
+
 ## v19: two fixes — stale-UI CSS bug, and a real runId gap QA caught in v18's recovery
 
 Two independent issues, both closed in this round.

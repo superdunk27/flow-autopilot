@@ -606,15 +606,76 @@
     });
   }
 
+  /**
+   * Real DOM drift found live 2026-09-15 (see README "v20") — Aree
+   * confirmed via direct DevTools probing (querySelectorAll over every
+   * <img>, checking naturalWidth/closest()) on a real successful
+   * imagegen run, not guessed: ChatGPT switched image-serving domains
+   * from *.oaiusercontent.com to a same-origin
+   * `/backend-api/estuary/content?id=file_...` endpoint, breaking
+   * SEL.generatedImage's URL match outright. Worse, the URL alone can
+   * no longer distinguish the AI-generated image from the user's own
+   * uploaded product photo — both now use the identical
+   * backend-api/estuary/content pattern. Confirmed live: the generated
+   * image's ancestor chain no longer includes any
+   * [data-message-author-role] element at all (closest() returns null
+   * — ChatGPT's UI renders it as an absolutely-positioned overlay
+   * outside the normal message flow, not nested in the reply bubble
+   * like before), while the user's own uploaded photo's closest() still
+   * correctly resolves to role="user". That ancestor check is the one
+   * reliable discriminator this is built on — not URL, not className
+   * (Aree's classNames are recorded in selectors.js as a secondary
+   * signal only, since utility-class strings are the most likely thing
+   * to drift again).
+   *
+   * Also handles a second real finding: 3 <img> elements matched for a
+   * single generated image (a progressive-loading UI — a blurred
+   * placeholder plus the final image as separate stacked elements, not
+   * one element that swaps its src) — picking "the first match" isn't
+   * safe, so this waits for a *loaded, reasonably large* candidate and
+   * prefers the largest by pixel area if more than one qualifies.
+   *
+   * Not a plain waitFor() call because none of this ("exclude an
+   * ancestor 30+ levels up", "prefer the largest of several loaded
+   * candidates") is expressible as a CSS selector list — the same
+   * reason findByVisibleText() exists instead of a selector for that
+   * case.
+   */
+  async function waitForGeneratedImage(step, { timeoutMs = 60000, pollMs = 250 } = {}) {
+    const isCandidate = (img) => {
+      const src = img.currentSrc || img.src || '';
+      if (!/backend-api\/estuary\/content/.test(src) && !/oaiusercontent/.test(src)) return false;
+      if (img.closest('[data-message-author-role="user"]')) return false; // the user's own uploaded photo
+      return true;
+    };
+    const start = Date.now();
+    for (;;) {
+      const loaded = Array.from(document.querySelectorAll('img'))
+        .filter(isCandidate)
+        .filter((img) => img.complete && img.naturalWidth > 100);
+      if (loaded.length) {
+        loaded.sort((a, b) => b.naturalWidth * b.naturalHeight - a.naturalWidth * a.naturalHeight);
+        return loaded[0];
+      }
+      if (Date.now() - start > timeoutMs) {
+        throw new FASelectorError({
+          step,
+          description: 'ภาพ storyboard ที่ ChatGPT สร้าง',
+          selectorsTried: SEL.generatedImage,
+          siteHint:
+            'เว็บอาจเปลี่ยน DOM อีกครั้ง — ตรวจ URL จริงของรูป (backend-api/estuary/content หรือ oaiusercontent) ' +
+            'และ closest(\'[data-message-author-role="user"]\') ผ่าน DevTools ว่ายังแยกรูป user/AI ได้ถูกไหม',
+        });
+      }
+      await FA_UTILS.sleep(pollMs);
+    }
+  }
+
   async function runImageGen(payload) {
     const warnings = [];
     await attachAndSend({ step: FA_STEPS.IMAGEGEN, ...payload, warnings });
     checkForMissingImageReply(FA_STEPS.IMAGEGEN);
-    const imgEl = await FA_UTILS.waitFor(SEL.generatedImage, {
-      step: FA_STEPS.IMAGEGEN,
-      description: 'ภาพ storyboard ที่ ChatGPT สร้าง',
-      timeoutMs: 60000,
-    });
+    const imgEl = await waitForGeneratedImage(FA_STEPS.IMAGEGEN);
     const imageDataUrl = await FA_UTILS.elementImageToDataUrl(imgEl);
     await sendStepDone({
       type: FA_MSG.STEP_DONE,
