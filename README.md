@@ -72,11 +72,15 @@ Fixed both:
   which bumps `updatedAt` — the existing "looks stuck" hint (see v4) now
   effectively resets on genuine progress instead of just on step/status
   transitions, making it more accurate, not just more informative.
-- `waitForPageReady()`'s two `waitFor` calls now specify an explicit
-  15s timeout each (was relying on the unstated 20s default) — Toey's
-  own observation that the page is usable around 6s in practice suggests
-  15s is already a comfortable margin, made explicit rather than
-  implicit.
+- `waitForPageReady()`'s `waitFor` calls originally shipped in this
+  commit with an explicit 15s timeout each, reasoned from Toey's casual
+  "page usable ~6s" remark in the bug report. **Corrected 2026-09-14**
+  after QA flagged it: that single anecdotal number isn't a worst-case
+  bound, and this is exactly the check v8 (1449a5a) deliberately left at
+  `waitFor()`'s unstated 20s default to absorb SPA-hydration variance —
+  right after fe947a0 had just *widened* timing elsewhere for that same
+  variance reason. Reverted to the 20s default; no functional reason to
+  have narrowed it here at all.
 
 Verified: the full `STEP_PROGRESS` round-trip was tested against the
 real running extension via CDP, not just read for plausibility — sent an

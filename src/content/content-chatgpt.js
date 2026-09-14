@@ -171,12 +171,10 @@
     await FA_UTILS.waitFor(SEL.composer, {
       step,
       description: 'ช่องพิมพ์ข้อความ (composer) — รอหน้าเว็บโหลดพร้อมใช้งานก่อนเริ่ม',
-      timeoutMs: 15000,
     });
     await FA_UTILS.waitFor(SEL.plusMenuButton, {
       step,
       description: 'ปุ่ม "+" — รอหน้าเว็บโหลดพร้อมใช้งานก่อนเริ่ม',
-      timeoutMs: 15000,
     });
     await FA_UTILS.sleep(1500);
     const stillPresent = (list) => list.some((sel) => {
@@ -193,7 +191,6 @@
       await FA_UTILS.waitFor(SEL.composer, {
         step,
         description: 'ช่องพิมพ์ข้อความ (composer) — หน้าเว็บ re-render ระหว่างรอ',
-        timeoutMs: 15000,
       });
       await FA_UTILS.sleep(1000);
     }
