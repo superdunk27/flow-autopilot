@@ -319,6 +319,27 @@ function render(run) {
   if (run.status === 'error') {
     showView('error');
     document.getElementById('errorStep').textContent = STEP_LABELS[run.error?.step] || run.error?.step || 'error';
+    // Added 2026-09-15: real report where Toey opened a fresh popup tab
+    // and saw an error immediately, with no way to tell whether it was
+    // from the run just attempted or a stale leftover from an earlier
+    // session — since this view is driven entirely by whatever's
+    // persisted in chrome.storage.local (see file header), it can't
+    // otherwise be told apart. run.updatedAt is already stamped by
+    // background.js's setRun() on every write; just wasn't surfaced
+    // here before.
+    const ageEl = document.getElementById('errorAge');
+    if (run.updatedAt) {
+      const elapsedMin = Math.round((Date.now() - run.updatedAt) / 60000);
+      ageEl.textContent =
+        elapsedMin < 1
+          ? 'เพิ่งเกิดขึ้นเมื่อครู่นี้'
+          : elapsedMin < 60
+            ? `เกิดขึ้นเมื่อ ${elapsedMin} นาทีที่แล้ว`
+            : `⚠️ เกิดขึ้นเมื่อ ${Math.round(elapsedMin / 60)} ชั่วโมงที่แล้ว — อาจเป็น error ค้างจากรอบก่อน ไม่ใช่รอบล่าสุด`;
+      ageEl.hidden = false;
+    } else {
+      ageEl.hidden = true;
+    }
     document.getElementById('errorMessage').textContent = run.error?.message || '';
     document.getElementById('errorHint').textContent = run.error?.hint || '';
     return;

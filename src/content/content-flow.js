@@ -12,6 +12,44 @@
   const NEW_PROJECT_TEXT_PATTERNS = [/new project/i];
   const ADD_TO_PROMPT_TEXT_PATTERNS = [/^add to prompt$/i, /add to prompt/i];
 
+  /**
+   * Added 2026-09-15 after a real "Generate button not found" report
+   * where the chrome://extensions error log's reported source line
+   * (content-flow.js:717 at the time) turned out — confirmed by
+   * checking that exact git commit — to be the shared catch-all
+   * `console.error('[Flow Autopilot]', err)` call every step's error
+   * funnels through, not the actual throw site. Chrome attributes a
+   * console.error() call's displayed location to where console.error
+   * itself was invoked, not to the original Error's own captured
+   * stack — so every thrown error in this file shows the same misleading
+   * line number there, regardless of which function actually failed.
+   * The real throw site has to be identified from the error MESSAGE
+   * content instead (verified here by matching `selectorsTried`).
+   *
+   * Since that confusion cost real investigation time with no live DOM
+   * access to fall back on, this captures a real, compact inventory of
+   * visible buttons on the page at the moment a critical selector
+   * search fails — so if a report like this happens again, the actual
+   * DOM evidence needed to fix a selector is already in the error text
+   * itself, without needing a live VNC session to go re-discover it.
+   */
+  function describeVisibleButtons(limit = 12) {
+    try {
+      return Array.from(document.querySelectorAll('button'))
+        .filter((btn) => FA_UTILS.isReallyVisible(btn))
+        .slice(0, limit)
+        .map((btn) => {
+          const label = (btn.getAttribute('aria-label') || '').trim();
+          const text = (btn.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 30);
+          const testid = (btn.getAttribute('data-testid') || '').trim();
+          return `[aria-label="${label}" text="${text}" data-testid="${testid}"]`;
+        })
+        .join(' ');
+    } catch (_) {
+      return '(เก็บ inventory ของปุ่มบนหน้าไม่สำเร็จ)';
+    }
+  }
+
   // Same keepalive-port acceptance as content-chatgpt.js — see README "v16".
   chrome.runtime.onConnect.addListener((port) => {
     if (port.name !== FA_KEEPALIVE_PORT_NAME) return;
@@ -630,6 +668,8 @@
           step: STEP,
           description: 'ปุ่ม Generate',
           selectorsTried: [...SEL.generateButton, `<text match: ${GENERATE_TEXT_PATTERNS.join(', ')}>`],
+          siteHint:
+            `เว็บอาจเปลี่ยน DOM — ปุ่มที่มองเห็นบนหน้าตอนนี้ (สูงสุด 12 อัน): ${describeVisibleButtons()}`,
         });
       }
     }
