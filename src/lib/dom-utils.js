@@ -29,6 +29,101 @@
     }
   }
 
+  // Mirrors FARateLimitError below, for Google Flow's own analogous
+  // condition — confirmed live 2026-09-15 (see README "v47"): what
+  // looked like a Generate-button selector bug was really Google Flow
+  // removing the button entirely and showing "Not enough credits to
+  // perform this action. Try other settings or upgrade for more
+  // credits." when the account is out of generation credits. Thrown
+  // instead of the generic FASelectorError when that phrasing is
+  // detected, so the error is honest about the real cause instead of
+  // implying a code bug.
+  class FAOutOfCreditsError extends Error {
+    constructor({ step }) {
+      super(
+        `[Flow Autopilot] เครดิต Google Flow หมดในขั้น "${step}" — เจอข้อความ ` +
+          `"Not enough credits to perform this action. Try other settings or upgrade for more credits." ` +
+          `แทนปุ่ม Generate ปกติ ไม่ใช่บั๊กโค้ด/selector พัง รอเครดิต refresh หรืออัปเกรดบัญชี แล้วลองใหม่`
+      );
+      this.name = 'FAOutOfCreditsError';
+      this.step = step;
+    }
+  }
+
+  /**
+   * ChatGPT's real, confirmed rate-limit notice for chats containing
+   * files/images (hit live 2026-09-14 while testing the analyze step —
+   * see README "v5"): "Chat paused until usage resets at <time> — You've
+   * reached the limit for chats that include files or images. Start a
+   * new text-only chat or upgrade to continue now." Thrown instead of
+   * trusting whatever content did or didn't get generated — a rate-limit
+   * hit is treated as an error unconditionally (never silently used, even
+   * if a response happens to look complete), since there's no reliable
+   * way to tell whether the banner appearing mid-generation means the
+   * response is trustworthy or truncated.
+   */
+  class FARateLimitError extends Error {
+    constructor({ step, resetsAt }) {
+      super(
+        `[Flow Autopilot] ChatGPT free tier มี rate limit สำหรับแชทที่มีไฟล์/รูปแนบ ในขั้น "${step}" — ` +
+          `เจอข้อความ "You've reached the limit for chats that include files or images"` +
+          `${resetsAt ? ` (จะใช้ได้อีกครั้งตอน ${resetsAt})` : ''}. ` +
+          `${resetsAt ? 'รอจนถึงเวลาที่ระบุ' : 'รอสักครู่'} หรือ upgrade บัญชี แล้วลองใหม่ — ไม่เชื่อถือ response ที่ได้ตอนนี้ เผื่อไว้ก่อนว่าอาจไม่ครบ`
+      );
+      this.name = 'FARateLimitError';
+      this.step = step;
+      this.resetsAt = resetsAt || null;
+    }
+  }
+
+  /**
+   * Scans the page's visible text for ChatGPT's rate-limit banner (see
+   * FARateLimitError above). Returns the extracted "resets at ..." time
+   * string if found (or `true` if the phrase matched but the time
+   * couldn't be parsed out), otherwise `false`. Does not throw — callers
+   * decide what to do with a positive match.
+   */
+  function detectChatGptRateLimit() {
+    const text = document.body ? document.body.innerText : '';
+    if (!/reached the limit for chats that include files or images/i.test(text)) return false;
+    const m = /resets at\s*([\d:]+\s*[AaPp]\.?[Mm]\.?)/.exec(text);
+    return m ? m[1] : true;
+  }
+
+  class FAMissingImageError extends Error {
+    constructor({ step, replyText }) {
+      super(
+        `[Flow Autopilot] ChatGPT ตอบกลับมาว่าไม่เห็นรูปที่แนบ ในขั้น "${step}" ` +
+          `(ข้อความ: "${(replyText || '').slice(0, 150)}") — แปลว่ารูปไม่ได้แนบไปกับข้อความจริง ` +
+          `แม้จะยืนยัน attachment chip ก่อนกดส่งแล้วก็ตาม ตรวจสอบ selector ใน src/lib/selectors.js ` +
+          `(fileInput/attachmentPreview) อีกครั้ง — เว็บอาจเปลี่ยน DOM หรือมีสาเหตุอื่นที่ยังไม่ทราบ`
+      );
+      this.name = 'FAMissingImageError';
+      this.step = step;
+    }
+  }
+
+  /**
+   * Defense-in-depth for a real bug (2026-09-14): the send button could
+   * become enabled from text alone, with no file actually attached, so a
+   * message went out with no image and ChatGPT replied asking for the
+   * photo instead of returning the expected storyboard. The pre-send
+   * attachment-chip check in content-chatgpt.js should make this
+   * scenario impossible going forward, but this catches it anyway if it
+   * somehow still happens (DOM change, a chip that renders but doesn't
+   * mean what we think, etc.) rather than silently treating ChatGPT's
+   * "please upload a photo" reply as if it were the real storyboard
+   * response.
+   */
+  function detectChatGptMissingImageReply(text) {
+    if (!text) return false;
+    return (
+      /please (upload|attach|share|provide|send).{0,40}(product )?(photo|image)/i.test(text) ||
+      /\bi (don'?t|do not) (see|have)\b.{0,20}(image|photo)/i.test(text) ||
+      /(no|without) (an )?image (was |has been )?(attached|uploaded|provided|received)/i.test(text)
+    );
+  }
+
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const randomDelay = (minMs, maxMs) =>
@@ -96,18 +191,84 @@
    * Returns null (does not throw) if nothing matches; callers decide
    * whether that's fatal.
    */
+  /**
+   * True visibility check, not just "this element's own box is
+   * non-zero" — a real bug (2026-09-14) traced back to exactly this
+   * gap: portal/animation-based menu libraries often keep menu item
+   * elements mounted in the DOM with a real non-zero own size even
+   * while the menu is closed (an *ancestor* clips/hides them via
+   * display:none, a collapsed max-height, aria-hidden, etc.), so the
+   * old own-rect-only check could report a closed menu's item as
+   * "visible" and click it — doing nothing observable, which is exactly
+   * what got reported. Element.checkVisibility() (Chrome 105+) actually
+   * walks ancestors; falls back to the old shallow check on engines
+   * without it rather than throwing.
+   */
+  function isReallyVisible(el) {
+    if (typeof el.checkVisibility === 'function') {
+      try {
+        return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+      } catch (_) {
+        // fall through to the shallow check below
+      }
+    }
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+  }
+
   function findByVisibleText(tagSelector, textPatterns, { root: searchRoot = document } = {}) {
     const patterns = Array.isArray(textPatterns) ? textPatterns : [textPatterns];
     const candidates = Array.from(searchRoot.querySelectorAll(tagSelector));
     for (const el of candidates) {
       const text = (el.innerText || el.textContent || '').trim();
       if (!text) continue;
-      const rect = el.getBoundingClientRect();
-      const visible = rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== 'hidden';
-      if (!visible) continue;
+      if (!isReallyVisible(el)) continue;
       if (patterns.some((re) => re.test(text))) return el;
     }
     return null;
+  }
+
+  /** True if `el` looks enabled/clickable — neither the native `disabled`
+   * property nor `aria-disabled="true"` is set. */
+  function isEnabled(el) {
+    return !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+  }
+
+  /**
+   * Waits until `el` becomes enabled (see isEnabled). Used as a
+   * *functional* readiness signal — e.g. "has this site's composer
+   * finished processing an upload" — instead of guessing at whichever
+   * decorative thumbnail/preview markup the site happens to render for
+   * that state, which is far more likely to drift across DOM changes
+   * than the button's own disabled state (the site has to keep that
+   * correct for its own UI to work at all). Throws FATimeoutError if it
+   * never becomes enabled — never silently proceeds with a disabled
+   * button.
+   */
+  async function waitForEnabled(el, { step, description, timeoutMs = 30000, pollMs = 250 } = {}) {
+    const start = Date.now();
+    while (!isEnabled(el)) {
+      if (Date.now() - start > timeoutMs) {
+        throw new FATimeoutError({ step, description, timeoutMs });
+      }
+      await sleep(pollMs);
+    }
+  }
+
+  /**
+   * Best-effort variant of waitFor: same polling behavior, but resolves
+   * to `null` instead of throwing if nothing matches within timeoutMs.
+   * Use for signals that are a nice-to-have confidence boost but should
+   * never block or fail the pipeline on their own (e.g. an optional
+   * upload-thumbnail check layered on top of a required functional
+   * check like waitForEnabled).
+   */
+  async function softWaitFor(selectorList, { timeoutMs = 5000, pollMs = 250, root: searchRoot = document } = {}) {
+    try {
+      return await waitFor(selectorList, { step: 'soft', description: 'soft', timeoutMs, pollMs, root: searchRoot });
+    } catch (_) {
+      return null;
+    }
   }
 
   /**
@@ -247,6 +408,10 @@
     waitFor,
     isLastResortMatch,
     findByVisibleText,
+    isReallyVisible,
+    isEnabled,
+    waitForEnabled,
+    softWaitFor,
     waitForDisappearance,
     waitForGenerationComplete,
     dataUrlToFile,
@@ -256,7 +421,12 @@
     setNativeValue,
     typeIntoComposer,
     serializeError,
+    detectChatGptRateLimit,
+    detectChatGptMissingImageReply,
   };
   root.FASelectorError = FASelectorError;
   root.FATimeoutError = FATimeoutError;
+  root.FAOutOfCreditsError = FAOutOfCreditsError;
+  root.FARateLimitError = FARateLimitError;
+  root.FAMissingImageError = FAMissingImageError;
 })(typeof window !== 'undefined' ? window : globalThis);

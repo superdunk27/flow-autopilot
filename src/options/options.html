@@ -15,6 +15,7 @@
   .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
   .checkbox-row label { margin: 0; }
   .disclaimer { background: #fff8e1; border: 1px solid #f0d98c; border-radius: 6px; padding: 10px; font-size: 12px; line-height: 1.5; color: #6b5a00; }
+  .linklike { margin: 0; padding: 0; border: none; background: none; color: #2563eb; font-size: 12px; text-decoration: underline; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -26,16 +27,18 @@
     อาจขัดกับ ToS ของแต่ละแพลตฟอร์ม ความเสี่ยงเป็นของผู้ใช้แต่ละคนเอง
   </p>
 
-  <label for="customGptUrl">Custom GPT URL (สำหรับขั้นวิเคราะห์สินค้า)</label>
-  <input type="text" id="customGptUrl" placeholder="https://chatgpt.com/g/g-xxxxxxxx-xxxxx" />
   <p class="hint">
-    เปิด custom GPT ที่คุณต้องการใช้วิเคราะห์รูปสินค้าใน ChatGPT แล้ว copy URL จาก address bar มาวางที่นี่
-    (เช่น GPT "รีวิวสินค้า minimal" จาก Crewbank.com ตามคลิปต้นแบบ หรือ custom GPT ของคุณเอง)
+    ไม่ต้อง setup อะไรก่อนใช้งาน — extension เปิดแชท ChatGPT ธรรมดา (ไม่ใช่ custom GPT)
+    แล้วส่งคำสั่งวิเคราะห์รูปสินค้าไปพร้อมกับรูปในข้อความเดียว ใช้ได้กับบัญชี ChatGPT free ทันที
   </p>
 
-  <label for="triggerMessage">ข้อความ trigger ที่จะส่งพร้อมรูปสินค้า</label>
-  <textarea id="triggerMessage"></textarea>
-  <p class="hint">ข้อความนี้จะถูกพิมพ์ในแชทพร้อมรูปสินค้าที่คุณเลือกใน popup</p>
+  <label for="analyzeTemplate">ข้อความ template ที่ส่งพร้อมรูปสินค้า (ขั้นวิเคราะห์)</label>
+  <textarea id="analyzeTemplate" rows="14"></textarea>
+  <p class="hint">
+    ค่าเริ่มต้นคือ template ตามสเปก (ห้ามเปลี่ยนถ้าต้องการผลลัพธ์ตรงตามที่ทดสอบไว้) — แก้ได้ถ้าอยากปรับโทน/สไตล์เอง
+    เช่น เปลี่ยนพื้นหลัง/มุมกล้องที่ระบุใน "Storyboard Image Prompt"
+    <button type="button" id="resetTemplateBtn" class="linklike">กลับเป็นค่าเริ่มต้น</button>
+  </p>
 
   <div class="checkbox-row">
     <input type="checkbox" id="autoReview" />
