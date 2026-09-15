@@ -13,6 +13,50 @@ one click:
 
 Inspired by the manual workflow shown in [this YouTube Short](https://www.youtube.com/shorts/ONcS93wLmPQ).
 
+## v47: 🎯 real root cause of "Generate button not found" — Google Flow out of credits, not a selector bug
+
+The v46 diagnostics worked exactly as designed: Aree reloaded the
+extension, ran a genuinely fresh end-to-end pipeline (imagegen
+succeeded on the gimbal-camera product, new project + upload +
+prompt all landed correctly), hit a **new** error confirmed fresh by
+the new age indicator ("เพิ่งเกิดขึ้นเมื่อครู่นี้"), and the new button
+inventory showed the visible buttons on the page at that moment had
+no Generate button at all — only Home/Search/Filter/Add media/Help/
+Settings/Download/Trash/Ingredient/Clear prompt.
+
+Aree then looked at the real Flow page directly (not through the
+extension) and found the answer: **Google Flow itself removes the
+Generate button and replaces it with an orange "i" info icon when the
+account is out of generation credits**, showing "Not enough credits to
+perform this action. Try other settings or upgrade for more credits."
+on click. The button genuinely does not exist in that account state —
+nothing was ever wrong with `SEL.generateButton`. This also explains
+why generation had succeeded and failed intermittently all session:
+whether credits happened to be available at that moment, not DOM
+drift or a flaky selector.
+
+**Fixed (optional per Aree, shipped since it's low-risk and directly
+useful)**: added `detectFlowOutOfCredits()` — a best-effort text/
+attribute scan for the exact "not enough credits" / "upgrade for more
+credits" phrasing (verified against the real reported message via a
+standalone regex test before shipping) — checked right before the
+generic "Generate button not found" throw fires. If matched, throws a
+new `FAOutOfCreditsError` (mirroring the existing `FARateLimitError`
+pattern from the ChatGPT side) with an honest, specific message instead
+of the old generic one that implied a code bug.
+
+**Honest limit**: the orange icon's own markup was described visually
+by Aree, not confirmed via DevTools, so this can't reliably find the
+icon itself — it scans for the message's own wording via `title`/
+`aria-label` attributes (common for Material tooltips even before
+being opened) with a body-text scan as fallback. If the real DOM
+exposes the credits message differently (e.g. only inside a dynamically
+rendered overlay after a click this code never performs), this
+detection may still miss it and fall through to the old generic error
+— acceptable since that was already the prior behavior, this only adds
+a chance of a clearer message, never removes the underlying error
+handling. Not live-tested this round.
+
 ## v46: 🔍 investigated "Generate button not found" — the stack-trace line was a red herring, root cause still unconfirmed
 
 Toey reported a fresh popup tab immediately showing a stuck error state

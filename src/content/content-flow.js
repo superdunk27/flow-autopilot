@@ -50,6 +50,43 @@
     }
   }
 
+  /**
+   * Real root cause found live 2026-09-15 (see README "v47"): what
+   * looked like a "Generate button not found" selector bug was Google
+   * Flow itself — confirmed by Aree looking at the real page, not
+   * automation — removing the Generate button entirely and replacing
+   * it with an orange "i" info icon when the account is out of
+   * generation credits, showing "Not enough credits to perform this
+   * action. Try other settings or upgrade for more credits." on click.
+   * The button genuinely doesn't exist in that state; no selector was
+   * ever wrong.
+   *
+   * The orange icon's own selector/markup was NOT confirmed live (Aree
+   * described it visually, not via DevTools), so this can't reliably
+   * find the icon itself. Best-effort instead: scan for the credits
+   * message's own wording, which Material tooltips commonly expose via
+   * `title`/`aria-label` on the trigger element even before it's
+   * clicked open, with a body-text scan as a fallback in case it's
+   * already rendered inline instead. Used only to make the thrown
+   * error message honest and specific — the generic Generate-button
+   * error is still thrown either way (via siteHint), since this
+   * detection itself isn't confirmed live yet.
+   */
+  function detectFlowOutOfCredits() {
+    const CREDIT_PATTERNS = [/not enough credits?/i, /upgrade for more credits?/i];
+    try {
+      const withHints = document.querySelectorAll('[title], [aria-label]');
+      for (const el of withHints) {
+        const hint = `${el.getAttribute('title') || ''} ${el.getAttribute('aria-label') || ''}`;
+        if (CREDIT_PATTERNS.some((re) => re.test(hint))) return true;
+      }
+      const bodyText = document.body.innerText || '';
+      return CREDIT_PATTERNS.some((re) => re.test(bodyText));
+    } catch (_) {
+      return false;
+    }
+  }
+
   // Same keepalive-port acceptance as content-chatgpt.js — see README "v16".
   chrome.runtime.onConnect.addListener((port) => {
     if (port.name !== FA_KEEPALIVE_PORT_NAME) return;
@@ -663,6 +700,8 @@
       generateBtn = FA_UTILS.findByVisibleText('button', GENERATE_TEXT_PATTERNS);
       if (generateBtn) {
         warnings.push('⚠️ ปุ่ม Generate: หาไม่เจอด้วย selector ที่กำหนด ใช้การจับคู่จากข้อความปุ่มแทน โปรดตรวจผลลัพธ์');
+      } else if (detectFlowOutOfCredits()) {
+        throw new FAOutOfCreditsError({ step: STEP });
       } else {
         throw new FASelectorError({
           step: STEP,

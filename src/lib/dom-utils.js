@@ -29,6 +29,27 @@
     }
   }
 
+  // Mirrors FARateLimitError below, for Google Flow's own analogous
+  // condition — confirmed live 2026-09-15 (see README "v47"): what
+  // looked like a Generate-button selector bug was really Google Flow
+  // removing the button entirely and showing "Not enough credits to
+  // perform this action. Try other settings or upgrade for more
+  // credits." when the account is out of generation credits. Thrown
+  // instead of the generic FASelectorError when that phrasing is
+  // detected, so the error is honest about the real cause instead of
+  // implying a code bug.
+  class FAOutOfCreditsError extends Error {
+    constructor({ step }) {
+      super(
+        `[Flow Autopilot] เครดิต Google Flow หมดในขั้น "${step}" — เจอข้อความ ` +
+          `"Not enough credits to perform this action. Try other settings or upgrade for more credits." ` +
+          `แทนปุ่ม Generate ปกติ ไม่ใช่บั๊กโค้ด/selector พัง รอเครดิต refresh หรืออัปเกรดบัญชี แล้วลองใหม่`
+      );
+      this.name = 'FAOutOfCreditsError';
+      this.step = step;
+    }
+  }
+
   /**
    * ChatGPT's real, confirmed rate-limit notice for chats containing
    * files/images (hit live 2026-09-14 while testing the analyze step —
@@ -405,6 +426,7 @@
   };
   root.FASelectorError = FASelectorError;
   root.FATimeoutError = FATimeoutError;
+  root.FAOutOfCreditsError = FAOutOfCreditsError;
   root.FARateLimitError = FARateLimitError;
   root.FAMissingImageError = FAMissingImageError;
 })(typeof window !== 'undefined' ? window : globalThis);
